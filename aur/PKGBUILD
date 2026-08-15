@@ -14,11 +14,12 @@
 # excluded — it's the packaging itself, which lives in the AUR repo, not the
 # source tarball; (2) --mtime is pinned (git archive stamps the CURRENT time
 # otherwise, which would change the hash on every run):
-#   git archive --format=tar.gz --prefix="app-wiz4rd-$pkgver/" \
+#   git archive --format=tar --prefix="app-wiz4rd-$pkgver/" \
 #     --mtime="2026-08-14 12:00:00 UTC" \
-#     -o release/app-wiz4rd-$pkgver.tar.gz HEAD^{tree} -- . ':(exclude)aur' ':(exclude)scripts' ':(exclude).github'
-#   (archive HEAD^{tree}, not HEAD — HEAD embeds a commit-id pax comment
-#   that changes the hash on every commit even when the files don't)
+#     -o release/app-wiz4rd-$pkgver.tar HEAD^{tree} -- . ':(exclude)aur' ':(exclude)scripts' ':(exclude).github'
+#   (plain tar, not tar.gz — gzip output varies by zlib version; archive
+#   HEAD^{tree}, not HEAD — HEAD embeds a commit-id pax comment that changes
+#   the hash on every commit even when the files don't)
 #   …or just run scripts/release.sh — it builds BOTH artifacts (source +
 #   zero-install binary) and prints their sha256sums.
 
@@ -31,8 +32,8 @@ url="https://github.com/r4-ndm/app-wiz4rd"
 license=('MIT')
 depends=('bash' 'paru')
 makedepends=('go')
-source=("app-wiz4rd-$pkgver.tar.gz::https://github.com/r4-ndm/app-wiz4rd/releases/download/v$pkgver/app-wiz4rd-$pkgver.tar.gz")
-sha256sums=('bddd23aea4bd1b91e4ddb8f87c10cdb4b28c5dbc6e1392a82d28c6e3e43059c0')
+source=("app-wiz4rd-$pkgver.tar::https://github.com/r4-ndm/app-wiz4rd/releases/download/v$pkgver/app-wiz4rd-$pkgver.tar")
+sha256sums=('429f90ac37e656320813bc4179e732cff7da195466b551093683337d3a2c7773')
 
 build() {
     cd "$srcdir/app-wiz4rd-$pkgver/dialog"

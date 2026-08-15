@@ -2,11 +2,12 @@
 # Release helper for app-wiz4rd — builds BOTH release artifacts for a GitHub
 # release:
 #
-#   1. release/app-wiz4rd-$VER.tar.gz          SOURCE tarball (AUR makepkg).
-#      Deterministic: archiving HEAD^{tree} (NOT HEAD) skips the commit-id
-#      pax comment, and aur/ + scripts/ + .github/ are excluded with
-#      --mtime pinned — so the sha256 only changes when the shipped source
-#      actually changes.
+#   1. release/app-wiz4rd-$VER.tar             SOURCE tarball (AUR makepkg).
+#      Plain UNCOMPRESSED tar — deterministic across machines. Archiving
+#      HEAD^{tree} (NOT HEAD) skips the commit-id pax comment, aur/ +
+#      scripts/ + .github/ are excluded, and --mtime is pinned. (gzip is
+#      deliberately NOT used: deflate output varies by zlib version, so a
+#      .tar.gz hash differs between the dev box and GitHub Actions.)
 #   2. release/app-wiz4rd-$VER-$ARCH.tar.gz    ZERO-INSTALL tarball — ships the
 #      prebuilt static TUI, so extracting and running ./app-wiz4rd needs no
 #      Go, no AUR helper, no build step.
@@ -31,10 +32,10 @@ trap 'rm -rf "$STAGE"' EXIT
 echo "==> Building static TUI..."
 ( cd dialog && CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o syntropia-apps-tui . )
 
-# 2. Source tarball (AUR). Only tracked files; aur/ and scripts/ are excluded.
+# 2. Source tarball (AUR) — plain tar for cross-machine reproducibility.
 echo "==> Building source tarball (AUR)..."
-git archive --format=tar.gz --prefix="app-wiz4rd-$VER/" --mtime="$MTIME" \
-    -o "$OUT/app-wiz4rd-$VER.tar.gz" "HEAD^{tree}" -- . ':(exclude)aur' ':(exclude)scripts' ':(exclude).github'
+git archive --format=tar --prefix="app-wiz4rd-$VER/" --mtime="$MTIME" \
+    -o "$OUT/app-wiz4rd-$VER.tar" "HEAD^{tree}" -- . ':(exclude)aur' ':(exclude)scripts' ':(exclude).github'
 
 # 3. Zero-install tarball: runtime files + prebuilt binary, nothing to build.
 echo "==> Building zero-install tarball..."
@@ -65,4 +66,4 @@ echo "Artifacts in $OUT/:"
 ls -la "$OUT"
 echo
 echo "Pin these sha256sums (source -> aur/PKGBUILD + iso/build.sh):"
-sha256sum "$OUT/app-wiz4rd-$VER.tar.gz" "$OUT/app-wiz4rd-$VER-$ARCH.tar.gz"
+sha256sum "$OUT/app-wiz4rd-$VER.tar" "$OUT/app-wiz4rd-$VER-$ARCH.tar.gz"
