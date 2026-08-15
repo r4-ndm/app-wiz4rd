@@ -3,8 +3,8 @@
 # release:
 #
 #   1. release/app-wiz4rd-$VER.tar.gz          SOURCE tarball (AUR makepkg).
-#      Deterministic: aur/ + scripts/ excluded, --mtime pinned, so the sha256
-#      only changes when the shipped source actually changes.
+#      Deterministic: aur/ + scripts/ + .github/ excluded, --mtime pinned,
+#      so the sha256 only changes when the shipped source actually changes.
 #   2. release/app-wiz4rd-$VER-$ARCH.tar.gz    ZERO-INSTALL tarball — ships the
 #      prebuilt static TUI, so extracting and running ./app-wiz4rd needs no
 #      Go, no AUR helper, no build step.
@@ -32,7 +32,7 @@ echo "==> Building static TUI..."
 # 2. Source tarball (AUR). Only tracked files; aur/ and scripts/ are excluded.
 echo "==> Building source tarball (AUR)..."
 git archive --format=tar.gz --prefix="app-wiz4rd-$VER/" --mtime="$MTIME" \
-    -o "$OUT/app-wiz4rd-$VER.tar.gz" HEAD -- . ':(exclude)aur' ':(exclude)scripts'
+    -o "$OUT/app-wiz4rd-$VER.tar.gz" HEAD -- . ':(exclude)aur' ':(exclude)scripts' ':(exclude).github'
 
 # 3. Zero-install tarball: runtime files + prebuilt binary, nothing to build.
 echo "==> Building zero-install tarball..."

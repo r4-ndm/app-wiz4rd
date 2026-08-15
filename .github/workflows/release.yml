@@ -1,0 +1,58 @@
+name: release
+
+# Pushing a tag like v0.1.0 builds BOTH release artifacts (AUR source tarball
+# + zero-install binary tarball) and attaches them to the GitHub release.
+#
+# The source tarball is deterministic (aur/ + scripts/ + .github/ excluded,
+# --mtime pinned), so this must reproduce the exact sha256 already pinned in
+# aur/PKGBUILD. The "verify" step fails the run if it doesn't — that's your
+# cue to run ./scripts/release.sh locally, re-pin aur/PKGBUILD + .SRCINFO,
+# commit, and re-tag.
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: dialog/go.mod
+
+      - name: Build release artifacts
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          ./scripts/release.sh "$VERSION"
+
+      - name: Verify source tarball sha is pinned
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          SRC="release/app-wiz4rd-${VERSION}.tar.gz"
+          pinned="$(sed -n "s/^sha256sums=('\([0-9a-f]\{64\}\)'.*/\1/p" aur/PKGBUILD)"
+          actual="$(sha256sum "$SRC" | awk '{print $1}')"
+          echo "pinned: $pinned"
+          echo "built:  $actual"
+          if [[ "$pinned" != "$actual" ]]; then
+            echo "::error::Source tarball sha256 does not match aur/PKGBUILD."
+            echo "::error::Run ./scripts/release.sh locally, update aur/PKGBUILD sha256sums + aur/.SRCINFO, commit, then re-tag."
+            exit 1
+          fi
+
+      - name: Attach tarballs to the release
+        uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true
+          files: |
+            release/app-wiz4rd-*.tar.gz
