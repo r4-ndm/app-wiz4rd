@@ -22,6 +22,17 @@ installed):
 ./app-wiz4rd
 ```
 
+Or grab the **zero-install tarball** from the latest GitHub release —
+the prebuilt static TUI is bundled, so no Go and no AUR helper is
+needed:
+
+```bash
+curl -LO https://github.com/r4-ndm/app-wiz4rd/releases/latest/download/app-wiz4rd-0.1.0-x86_64.tar.gz
+tar -xzf app-wiz4rd-0.1.0-x86_64.tar.gz
+cd app-wiz4rd-0.1.0
+./app-wiz4rd
+```
+
 ## What it does
 
 - Shows your catalog as a keyboard-first checkbox grid (`↑/↓`/`jk` move,

@@ -16,7 +16,9 @@
 # otherwise, which would change the hash on every run):
 #   git archive --format=tar.gz --prefix="app-wiz4rd-$pkgver/" \
 #     --mtime="2026-08-14 12:00:00 UTC" \
-#     -o release/app-wiz4rd-$pkgver.tar.gz HEAD -- . ':(exclude)aur'
+#     -o release/app-wiz4rd-$pkgver.tar.gz HEAD -- . ':(exclude)aur' ':(exclude)scripts'
+#   …or just run scripts/release.sh — it builds BOTH artifacts (source +
+#   zero-install binary) and prints their sha256sums.
 
 pkgname=app-wiz4rd
 pkgver=0.1.0
