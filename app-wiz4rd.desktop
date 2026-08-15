@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Version=1.0
+Name=Syntropia Apps
+GenericName=App installer
+Comment=Pick your favorite apps and install them together with paru
+Exec=app-wiz4rd
+Icon=system-software-install
+Terminal=true
+Categories=System;Utility;

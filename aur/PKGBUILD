@@ -1,0 +1,48 @@
+# Maintainer: r4-ndm
+# Contributor: Syntropia Team <hello@project-syntropia.io>
+#
+# app-wiz4rd — the Syntropia "pick your favorite apps" wizard, standalone
+# edition. One grouped checkbox TUI (Bubble Tea / Charm ecosystem) that
+# installs whatever you check in a single `paru -S` transaction. The TUI is
+# a static Go binary with zero runtime dependencies.
+#
+# Build/test locally: drop the release tarball into this directory, then
+#   cd aur && makepkg -si
+#
+# Release tarball: generated deterministically from the app-wiz4rd repo with
+# two rules that keep the sha256 STABLE across rebuilds: (1) the aur/ dir is
+# excluded — it's the packaging itself, which lives in the AUR repo, not the
+# source tarball; (2) --mtime is pinned (git archive stamps the CURRENT time
+# otherwise, which would change the hash on every run):
+#   git archive --format=tar.gz --prefix="app-wiz4rd-$pkgver/" \
+#     --mtime="2026-08-14 12:00:00 UTC" \
+#     -o release/app-wiz4rd-$pkgver.tar.gz HEAD -- . ':(exclude)aur'
+
+pkgname=app-wiz4rd
+pkgver=0.1.0
+pkgrel=1
+pkgdesc="Syntropia app wizard — pick your favorite apps, installs them together with paru"
+arch=('x86_64')
+url="https://github.com/r4-ndm/app-wiz4rd"
+license=('MIT')
+depends=('bash' 'paru')
+makedepends=('go')
+source=("app-wiz4rd-$pkgver.tar.gz::https://github.com/r4-ndm/app-wiz4rd/releases/download/v$pkgver/app-wiz4rd-$pkgver.tar.gz")
+sha256sums=('__SHA256__')
+
+build() {
+    cd "$srcdir/app-wiz4rd-$pkgver/dialog"
+    msg "Building the static TUI (CGO_ENABLED=0)..."
+    CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o syntropia-apps-tui .
+}
+
+package() {
+    _src="$srcdir/app-wiz4rd-$pkgver"
+    msg "Installing the wizard..."
+    install -Dm755 "$_src/app-wiz4rd" "$pkgdir/usr/bin/app-wiz4rd"
+    install -Dm644 "$_src/apps.list" "$pkgdir/usr/share/app-wiz4rd/apps.list"
+    install -Dm644 "$_src/syntropia-apps.desktop" "$pkgdir/usr/share/app-wiz4rd/syntropia-apps.desktop"
+    install -Dm755 "$_src/dialog/syntropia-apps-tui" "$pkgdir/usr/share/app-wiz4rd/dialog/syntropia-apps-tui"
+    install -Dm644 "$_src/app-wiz4rd.desktop" "$pkgdir/usr/share/applications/app-wiz4rd.desktop"
+    install -Dm644 "$_src/LICENSE" "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+}

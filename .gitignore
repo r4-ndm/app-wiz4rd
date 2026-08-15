@@ -1,0 +1,5 @@
+# build artifacts
+dialog/syntropia-apps-tui
+
+# release tarballs
+release/
