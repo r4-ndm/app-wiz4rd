@@ -3,8 +3,9 @@ name: release
 # Pushing a tag like v0.1.0 builds BOTH release artifacts (AUR source tarball
 # + zero-install binary tarball) and attaches them to the GitHub release.
 #
-# The source tarball is deterministic (aur/ + scripts/ + .github/ excluded,
-# --mtime pinned), so this must reproduce the exact sha256 already pinned in
+# The source tarball is deterministic (archived as HEAD^{tree} — NOT HEAD —
+# with aur/ + scripts/ + .github/ excluded and --mtime pinned), so this
+# must reproduce the exact sha256 already pinned in
 # aur/PKGBUILD. The "verify" step fails the run if it doesn't — that's your
 # cue to run ./scripts/release.sh locally, re-pin aur/PKGBUILD + .SRCINFO,
 # commit, and re-tag.
