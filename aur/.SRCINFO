@@ -9,6 +9,6 @@ pkgbase = app-wiz4rd
 	depends = bash
 	depends = paru
 	source = app-wiz4rd-0.1.0.tar.gz::https://github.com/r4-ndm/app-wiz4rd/releases/download/v0.1.0/app-wiz4rd-0.1.0.tar.gz
-	sha256sums = de79cba7b38e3647c44dba8a49fa16279097a3b7b940b81ad82e025e0be7084f
+	sha256sums = bddd23aea4bd1b91e4ddb8f87c10cdb4b28c5dbc6e1392a82d28c6e3e43059c0
 
 pkgname = app-wiz4rd

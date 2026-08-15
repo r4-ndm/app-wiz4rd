@@ -16,7 +16,9 @@
 # otherwise, which would change the hash on every run):
 #   git archive --format=tar.gz --prefix="app-wiz4rd-$pkgver/" \
 #     --mtime="2026-08-14 12:00:00 UTC" \
-#     -o release/app-wiz4rd-$pkgver.tar.gz HEAD -- . ':(exclude)aur' ':(exclude)scripts' ':(exclude).github'
+#     -o release/app-wiz4rd-$pkgver.tar.gz HEAD^{tree} -- . ':(exclude)aur' ':(exclude)scripts' ':(exclude).github'
+#   (archive HEAD^{tree}, not HEAD — HEAD embeds a commit-id pax comment
+#   that changes the hash on every commit even when the files don't)
 #   …or just run scripts/release.sh — it builds BOTH artifacts (source +
 #   zero-install binary) and prints their sha256sums.
 
@@ -30,7 +32,7 @@ license=('MIT')
 depends=('bash' 'paru')
 makedepends=('go')
 source=("app-wiz4rd-$pkgver.tar.gz::https://github.com/r4-ndm/app-wiz4rd/releases/download/v$pkgver/app-wiz4rd-$pkgver.tar.gz")
-sha256sums=('de79cba7b38e3647c44dba8a49fa16279097a3b7b940b81ad82e025e0be7084f')
+sha256sums=('bddd23aea4bd1b91e4ddb8f87c10cdb4b28c5dbc6e1392a82d28c6e3e43059c0')
 
 build() {
     cd "$srcdir/app-wiz4rd-$pkgver/dialog"
