@@ -1,0 +1,14 @@
+pkgbase = app-wiz4rd
+	pkgdesc = Syntropia app wizard — pick your favorite apps, installs them together with paru
+	pkgver = 0.1.0
+	pkgrel = 1
+	url = https://github.com/r4-ndm/app-wiz4rd
+	arch = x86_64
+	license = MIT
+	makedepends = go
+	depends = bash
+	depends = paru
+	source = app-wiz4rd-0.1.0.tar.gz::https://github.com/r4-ndm/app-wiz4rd/releases/download/v0.1.0/app-wiz4rd-0.1.0.tar.gz
+	sha256sums = 674867858e02ff7b6f29b90c69f9ed2fe8d154c728a24c349db83f889f5764bc
+
+pkgname = app-wiz4rd
