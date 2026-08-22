@@ -29,8 +29,8 @@ AI|Ollama|ollama|Run local LLMs from terminal / API
 AI|Freebuff|freebuff-bin|AI coding agent for the terminal
 
 Terminal|Ghostty|ghostty|Fast, native GPU-accelerated terminal
+Terminal|Warp|warp-terminal-bin|Fast Rust-based terminal with AI built-in
 Terminal|Wezterm|wezterm|GPU-accelerated terminal emulator
-Terminal|Alacritty|alacritty|Fast minimal GPU terminal
 Terminal|Micro|micro|Intuitive terminal text editor
 
 CLI|ripgrep|ripgrep|Blazingly fast grep
