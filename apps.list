@@ -49,9 +49,9 @@ Video|Video Downloader|video-downloader|GUI video/audio downloader
 
 Graphics|GIMP|gimp|Raster graphics editor (Photoshop alternative)
 Graphics|Flameshot|flameshot|Screenshot and annotation tool
-Graphics|Simple Scan|simple-scan|Document and photo scanner utility
 
 Privacy|Mysterium VPN|mysterium-vpn-desktop-bin|Decentralized P2P VPN client
+Privacy|QRedshift|qredshift|Screen color temperature & blue light filter
 Privacy|Pass|pass|Standard Unix password manager
 Privacy|qBittorrent|qbittorrent|BitTorrent client
 
