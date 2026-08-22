@@ -24,6 +24,8 @@ DESKTOP_TEMPLATE="$SCRIPT_DIR/syntropia-apps.desktop"
 [[ -f "$DESKTOP_TEMPLATE" ]] || DESKTOP_TEMPLATE="$PKG_DIR/syntropia-apps.desktop"
 TUI_BIN="$SCRIPT_DIR/dialog/syntropia-apps-tui"
 [[ -x "$TUI_BIN" ]] || TUI_BIN="$PKG_DIR/dialog/syntropia-apps-tui"
+[[ -x "$TUI_BIN" ]] || TUI_BIN="$(command -v syntropia-apps-tui 2>/dev/null || true)"
+[[ -n "$TUI_BIN" && -x "$TUI_BIN" ]] || TUI_BIN="/usr/local/bin/syntropia-apps-tui"
 
 MODE="interactive"
 CATALOG=""
