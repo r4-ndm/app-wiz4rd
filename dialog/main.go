@@ -233,7 +233,10 @@ func (m *model) buildGrid(ncols int) {
 	cols := packGroups(m.groups, ncols)
 	for ci := range cols {
 		row := 0
-		for _, gi := range cols[ci] {
+		for gIdx, gi := range cols[ci] {
+			if gIdx > 0 {
+				row++ // spacer row
+			}
 			row++ // header row
 			for ii := range m.groups[gi].items {
 				it := m.groups[gi].items[ii]
@@ -397,13 +400,12 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 // balancing each column's rendered height (header + items).
 const maxCols = 5
 
-// packGroups splits group indices across n columns in catalog order.
+// packGroups splits group indices across n columns in catalog order,
+// finding the partition that minimizes the maximum column height so all
+// columns have balanced, even package layouts.
 func packGroups(groups []group, n int) [][]int {
-	heights := make([]int, len(groups))
-	total := 0
-	for gi := range groups {
-		heights[gi] = 1 + len(groups[gi].items)
-		total += heights[gi]
+	if len(groups) == 0 {
+		return nil
 	}
 	if n < 1 {
 		n = 1
@@ -411,16 +413,68 @@ func packGroups(groups []group, n int) [][]int {
 	if n > len(groups) {
 		n = len(groups)
 	}
-	target := (total + n - 1) / n
-	cols := make([][]int, n)
-	ci, cur := 0, 0
-	for gi := range groups {
-		if ci < n-1 && cur > 0 && cur+heights[gi] > target {
-			ci++
-			cur = 0
+	if n == 1 {
+		col := make([]int, len(groups))
+		for i := range groups {
+			col[i] = i
 		}
-		cols[ci] = append(cols[ci], gi)
-		cur += heights[gi]
+		return [][]int{col}
+	}
+
+	heights := make([]int, len(groups))
+	for gi := range groups {
+		heights[gi] = 1 + len(groups[gi].items)
+	}
+
+	pref := make([]int, len(groups)+1)
+	for i := range groups {
+		pref[i+1] = pref[i] + heights[i]
+	}
+	sumRange := func(i, j int) int {
+		return pref[j] - pref[i]
+	}
+
+	dp := make([][]int, n+1)
+	split := make([][]int, n+1)
+	for k := 0; k <= n; k++ {
+		dp[k] = make([]int, len(groups)+1)
+		split[k] = make([]int, len(groups)+1)
+	}
+
+	for i := 0; i <= len(groups); i++ {
+		dp[1][i] = sumRange(i, len(groups))
+		split[1][i] = len(groups)
+	}
+
+	for k := 2; k <= n; k++ {
+		for i := 0; i < len(groups); i++ {
+			bestCost := 1 << 30
+			bestJ := i + 1
+			for j := i + 1; j <= len(groups)-(k-1); j++ {
+				c1 := sumRange(i, j)
+				cRest := dp[k-1][j]
+				cost := c1
+				if cRest > cost {
+					cost = cRest
+				}
+				if cost < bestCost {
+					bestCost = cost
+					bestJ = j
+				}
+			}
+			dp[k][i] = bestCost
+			split[k][i] = bestJ
+		}
+	}
+
+	cols := make([][]int, n)
+	curI := 0
+	for k := n; k >= 1; k-- {
+		nextI := split[k][curI]
+		for gi := curI; gi < nextI; gi++ {
+			cols[n-k] = append(cols[n-k], gi)
+		}
+		curI = nextI
 	}
 	return cols
 }
@@ -481,7 +535,10 @@ func (m model) View() string {
 	// how many columns fit comfortably? fill the width up to maxCols.
 	m.ensureGrid()
 	ncols := m.ncols
-	const gap = 2
+	gap := 3
+	if innerW >= 100 {
+		gap = 4
+	}
 	colW := (innerW - (ncols-1)*gap) / ncols // subtract the inter-column gaps so rows fit exactly
 
 	// header — big gradient banner when there's room, compact title otherwise
@@ -513,7 +570,11 @@ func (m model) View() string {
 	colLines := make([][]string, ncols)
 	for ci := range cols {
 		var lines []string
-		for _, gi := range cols[ci] {
+		for gIdx, gi := range cols[ci] {
+			if gIdx > 0 {
+				// Category spacing line
+				lines = append(lines, seg(bg, textC, false, strings.Repeat(" ", colW)))
+			}
 			hdr := lipgloss.NewStyle().Bold(true).
 				Foreground(lipgloss.Color(accent)).
 				Background(lipgloss.Color(bg)).
