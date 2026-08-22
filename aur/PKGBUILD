@@ -33,7 +33,7 @@ license=('MIT')
 depends=('bash' 'paru')
 makedepends=('go')
 source=("app-wiz4rd-$pkgver.tar::https://github.com/r4-ndm/app-wiz4rd/releases/download/v$pkgver/app-wiz4rd-$pkgver.tar")
-sha256sums=("0b8f017762a8e783177153a0b158d8eec3510f642b6eedcc25d92685286e363e")
+sha256sums=("3fcca00cc08afc90ae610a9616e85b671d025d124e83b09df3fcb5a49c275478")
 
 build() {
     cd "$srcdir/app-wiz4rd-$pkgver/dialog"
