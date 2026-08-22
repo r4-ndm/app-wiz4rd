@@ -21,16 +21,16 @@ Audio|Audacity|audacity|Audio editor (record, edit, mix)
 Audio|Ocenaudio|ocenaudio|Fast, intuitive audio editor
 
 AI|Antigravity|antigravity|Google Antigravity multi-agent coding IDE
+AI|Cursor|cursor-bin|AI-first code editor
+AI|Claude Code|claude-code|Agentic coding tool for the terminal
 AI|Hermes Agent|hermes-agent|Locally-run autonomous AI agent
 AI|Kiro IDE|kiro-ide|Agentic AI code editor
-AI|LM Studio|lmstudio|Run local LLMs with desktop GUI
 AI|Ollama|ollama|Run local LLMs from terminal / API
 AI|Freebuff|freebuff-bin|AI coding agent for the terminal
 
 Terminal|Ghostty|ghostty|Fast, native GPU-accelerated terminal
 Terminal|Wezterm|wezterm|GPU-accelerated terminal emulator
 Terminal|Alacritty|alacritty|Fast minimal GPU terminal
-Terminal|Neovim|neovim|Modern extensible Vim editor
 Terminal|Micro|micro|Intuitive terminal text editor
 
 CLI|ripgrep|ripgrep|Blazingly fast grep
