@@ -401,8 +401,8 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 const maxCols = 5
 
 // packGroups splits group indices across n columns in catalog order,
-// finding the partition that minimizes the maximum column height so all
-// columns have balanced, even package layouts.
+// finding the partition that minimizes the maximum column height (and sum of squares)
+// so all columns have balanced, evenly distributed package layouts.
 func packGroups(groups []group, n int) [][]int {
 	if len(groups) == 0 {
 		return nil
@@ -421,60 +421,64 @@ func packGroups(groups []group, n int) [][]int {
 		return [][]int{col}
 	}
 
-	heights := make([]int, len(groups))
-	for gi := range groups {
-		heights[gi] = 1 + len(groups[gi].items)
+	renderHeight := func(i, j int) int {
+		if j <= i {
+			return 0
+		}
+		total := 0
+		for g := i; g < j; g++ {
+			total += 1 + len(groups[g].items) // header + items
+		}
+		total += (j - i - 1) // inter-category spacers
+		return total
 	}
 
-	pref := make([]int, len(groups)+1)
-	for i := range groups {
-		pref[i+1] = pref[i] + heights[i]
-	}
-	sumRange := func(i, j int) int {
-		return pref[j] - pref[i]
+	type solution struct {
+		maxH int
+		sqH  int
+		cuts []int
 	}
 
-	dp := make([][]int, n+1)
-	split := make([][]int, n+1)
-	for k := 0; k <= n; k++ {
-		dp[k] = make([]int, len(groups)+1)
-		split[k] = make([]int, len(groups)+1)
-	}
+	var solve func(start, remainingCols int) solution
+	memo := make(map[[2]int]solution)
 
-	for i := 0; i <= len(groups); i++ {
-		dp[1][i] = sumRange(i, len(groups))
-		split[1][i] = len(groups)
-	}
+	solve = func(start, remainingCols int) solution {
+		key := [2]int{start, remainingCols}
+		if sol, ok := memo[key]; ok {
+			return sol
+		}
+		if remainingCols == 1 {
+			h := renderHeight(start, len(groups))
+			return solution{maxH: h, sqH: h * h, cuts: []int{len(groups)}}
+		}
 
-	for k := 2; k <= n; k++ {
-		for i := 0; i < len(groups); i++ {
-			bestCost := 1 << 30
-			bestJ := i + 1
-			for j := i + 1; j <= len(groups)-(k-1); j++ {
-				c1 := sumRange(i, j)
-				cRest := dp[k-1][j]
-				cost := c1
-				if cRest > cost {
-					cost = cRest
-				}
-				if cost < bestCost {
-					bestCost = cost
-					bestJ = j
-				}
+		best := solution{maxH: 1 << 30, sqH: 1 << 30, cuts: nil}
+		for next := start + 1; next <= len(groups)-(remainingCols-1); next++ {
+			hCur := renderHeight(start, next)
+			sub := solve(next, remainingCols-1)
+			maxH := hCur
+			if sub.maxH > maxH {
+				maxH = sub.maxH
 			}
-			dp[k][i] = bestCost
-			split[k][i] = bestJ
+			sqH := hCur*hCur + sub.sqH
+			if maxH < best.maxH || (maxH == best.maxH && sqH < best.sqH) {
+				best.maxH = maxH
+				best.sqH = sqH
+				best.cuts = append([]int{next}, sub.cuts...)
+			}
 		}
+		memo[key] = best
+		return best
 	}
 
+	bestSol := solve(0, n)
 	cols := make([][]int, n)
-	curI := 0
-	for k := n; k >= 1; k-- {
-		nextI := split[k][curI]
-		for gi := curI; gi < nextI; gi++ {
-			cols[n-k] = append(cols[n-k], gi)
+	cur := 0
+	for ci, cut := range bestSol.cuts {
+		for g := cur; g < cut; g++ {
+			cols[ci] = append(cols[ci], g)
 		}
-		curI = nextI
+		cur = cut
 	}
 	return cols
 }
