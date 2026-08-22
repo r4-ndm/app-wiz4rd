@@ -464,7 +464,10 @@ func packGroups(groups []group, n int) [][]int {
 			if maxH < best.maxH || (maxH == best.maxH && sqH < best.sqH) {
 				best.maxH = maxH
 				best.sqH = sqH
-				best.cuts = append([]int{next}, sub.cuts...)
+				cuts := make([]int, 1+len(sub.cuts))
+				cuts[0] = next
+				copy(cuts[1:], sub.cuts)
+				best.cuts = cuts
 			}
 		}
 		memo[key] = best
