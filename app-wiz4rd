@@ -15,7 +15,9 @@
 # asked to install anything, and only successful installs leave the queue. A
 # run without network therefore loses nothing: the picks wait in
 # ~/.config/syntropia/apps-wizard.pending, --once keeps firing until the queue is
-# empty, and `--resume` installs whatever is still waiting.
+# empty, and `--resume` installs whatever is still waiting. When the picker
+# starts offline it offers nmtui-connect first, and every install is teed to
+# ~/.local/state/app-wiz4rd/install.log so output survives a closed window.
 
 set -euo pipefail
 
@@ -28,6 +30,11 @@ DONE_MARKER="$CONFIG_HOME/syntropia/apps-wizard.done"
 # Choices that still need installing. Its presence is what makes a completed
 # wizard run again — see the --once gate at the bottom.
 PENDING_FILE="$CONFIG_HOME/syntropia/apps-wizard.pending"
+# Install output + run traces. The autostart path has no console when the
+# terminal relaunch fails, and a silent wizard is indistinguishable from one
+# that never ran — so both are always recorded somewhere the user can read.
+STATE_DIR="${XDG_STATE_HOME:-$HOME/.local/state}/app-wiz4rd"
+INSTALL_LOG="$STATE_DIR/install.log"
 BUNDLED_CATALOG="$SCRIPT_DIR/apps.list"
 [[ -f "$BUNDLED_CATALOG" ]] || BUNDLED_CATALOG="$PKG_DIR/apps.list"
 DESKTOP_TEMPLATE="$SCRIPT_DIR/syntropia-apps.desktop"
@@ -42,6 +49,18 @@ CATALOG=""
 
 die() { echo "😈 error: $*" >&2; exit 1; }
 have() { command -v "$1" >/dev/null 2>&1; }
+
+log() {
+    mkdir -p "$STATE_DIR" 2>/dev/null || return 0
+    printf '%s %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$*" >>"$INSTALL_LOG" 2>/dev/null || true
+}
+
+# Desktop notification for the paths that have no terminal to print to.
+notify() {
+    if have notify-send; then
+        notify-send --app-name="Syntropia" "Syntropia apps" "$1" >/dev/null 2>&1 || true
+    fi
+}
 
 # Cheap reachability probe. ICMP first (no curl dependency on a fresh install),
 # DNS as the fallback for networks that drop ping.
@@ -138,6 +157,37 @@ pending_note() {
     fi
 }
 
+# Offer a way online before the picker. The first boot is often offline (Wi-Fi
+# not joined yet); without this the user picks apps they cannot install and
+# only sees the queue message afterwards.
+connectivity_prompt() {
+    local attempt answer
+    [[ -t 0 ]] || return 0
+
+    for attempt in 1 2 3; do
+        is_online && return 0
+        echo "😈 No internet connection."
+        echo "   [1] Connect now (NetworkManager text UI)"
+        echo "   [2] Continue — picks are saved and installed once you are online"
+        printf '   Choose [1-2] (default: 1): '
+        IFS= read -r answer || return 0
+        case "${answer:-1}" in
+            1)
+                if have nmtui-connect; then
+                    nmtui-connect || true
+                elif have nmtui; then
+                    nmtui || true
+                else
+                    echo "   nmtui is not installed — connect with nmcli or Ethernet, then re-run."
+                    return 0
+                fi
+                ;;
+            *) return 0 ;;
+        esac
+    done
+    return 0
+}
+
 resolve_catalog() {
     [[ -n "$CATALOG" ]] && { [[ -f "$CATALOG" ]] || die "catalog not found: $CATALOG"; echo "$CATALOG"; return; }
     local user_catalog="$CONFIG_HOME/syntropia/apps.list"
@@ -146,10 +196,15 @@ resolve_catalog() {
     echo "$BUNDLED_CATALOG"
 }
 
+# The installed system is Plasma (konsole) or Hyprland (alacritty/kitty), but
+# the list covers the terminals a user may have installed and the freedesktop
+# launcher, which knows the session's preferred terminal.
 find_terminal() {
     [[ -n "${TERMINAL:-}" ]] && have "$TERMINAL" && { echo "$TERMINAL"; return; }
     local t
-    for t in konsole gnome-terminal xfce4-terminal kitty alacritty xterm; do
+    for t in konsole alacritty kitty ghostty foot wezterm \
+        gnome-terminal kgx xfce4-terminal x-terminal-emulator xterm \
+        xdg-terminal-exec; do
         have "$t" && { echo "$t"; return; }
     done
     return 1
@@ -160,10 +215,14 @@ launch_terminal() {
     case "$term" in
         konsole)        arr=(konsole -e bash -c "$inner") ;;
         gnome-terminal) arr=(gnome-terminal -- bash -c "$inner") ;;
+        kgx)            arr=(kgx -- bash -c "$inner") ;;
         xfce4-terminal) arr=(xfce4-terminal -x bash -c "$inner") ;;
         kitty)          arr=(kitty bash -c "$inner") ;;
         alacritty)      arr=(alacritty -e bash -c "$inner") ;;
-        xterm)          arr=(xterm -e bash -c "$inner") ;;
+        ghostty)        arr=(ghostty -e bash -c "$inner") ;;
+        foot)           arr=(foot bash -c "$inner") ;;
+        wezterm)        arr=(wezterm start -- bash -c "$inner") ;;
+        xdg-terminal-exec) arr=(xdg-terminal-exec bash -c "$inner") ;;
         *)              [[ -n "${TERMINAL:-}" ]] || return 1
                         arr=("$term" -e bash -c "$inner") ;;
     esac
@@ -270,10 +329,23 @@ process_pending() {
         fi
 
         echo "Installing packages: ${native[*]}"
+        echo "   (the output is also saved to $INSTALL_LOG)"
         echo
-        if paru -S --noconfirm "${native[@]}"; then
+        log "paru -S --noconfirm --needed ${native[*]}"
+        if paru -S --noconfirm --needed "${native[@]}" 2>&1 | tee -a "$INSTALL_LOG"; then
             clear_pending "${native[@]}"
         else
+            # paru can install most of a transaction and still exit non-zero
+            # (one broken AUR package). Unqueue only what really landed, so the
+            # queue stays the to-do list instead of looping on installed picks.
+            local -a done_pkgs=()
+            local pkg
+            for pkg in "${native[@]}"; do
+                if pacman -Q "$pkg" >/dev/null 2>&1; then
+                    done_pkgs+=("$pkg")
+                fi
+            done
+            ((${#done_pkgs[@]})) && clear_pending "${done_pkgs[@]}"
             echo
             echo "😈 paru could not install everything — the picks stay queued, so nothing is lost."
             pending_note
@@ -296,15 +368,29 @@ run_dialog() {
     if [[ ! -t 0 ]]; then
         local -a relaunch=("$0")
         [[ "$MODE" == "once" ]] && relaunch+=(--once)
+        [[ "$MODE" == "resume" ]] && relaunch+=(--resume)
         [[ -n "$CATALOG" ]] && relaunch+=(--config "$CATALOG")
         local term q
-        term="$(find_terminal)" || die "no terminal emulator found — run in a terminal instead: $0"
+        if ! term="$(find_terminal)"; then
+            log "error: no terminal emulator found"
+            notify "No terminal found — run app-wiz4rd from a terminal to pick apps."
+            die "no terminal emulator found — run in a terminal instead: $0 (log: $INSTALL_LOG)"
+        fi
         q="$(printf '%q ' "${relaunch[@]}")"
+        # Keep the window open when the inner run fails: a terminal that
+        # vanishes on error is exactly how "nothing happened" reports start.
+        q+="|| { echo; echo 'app-wiz4rd failed — log: $INSTALL_LOG'; read -r _; }"
+        log "relaunching inside $term (no tty on stdin)"
         launch_terminal "$term" "$q"
         exit 0
     fi
 
     ensure_tui
+
+    log "run mode=$MODE catalog=$cat_file"
+
+    # No connection? Give the user a way to get one before the picker.
+    connectivity_prompt
 
     # Anything queued from an earlier (offline) run is retried first: this is
     # what makes the first-boot prompt, the app menu and --resume all capable of
@@ -351,6 +437,7 @@ run_dialog() {
     # Durable first: the queue is the record of intent, paru is just the worker.
     queue_pending "${selected[@]}"
     echo "Queued ${#selected[@]} choice(s)."
+    log "picked: ${selected[*]}"
     echo
 
     if process_pending; then
@@ -402,7 +489,7 @@ while [[ $# -gt 0 ]]; do
         --config) [[ $# -ge 2 ]] || die "--config needs a file argument"; CATALOG="$2"; shift 2 ;;
         --install-autostart) MODE="install-autostart"; shift ;;
         --remove-autostart)  MODE="remove-autostart"; shift ;;
-        -h|--help) sed -n '2,18p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+        -h|--help) sed -n '2,20p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
         *) die "unknown option: $1 (try --help)" ;;
     esac
 done

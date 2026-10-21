@@ -36,9 +36,13 @@ cd app-wiz4rd-0.1.0
 ## What it does
 
 - Shows your catalog as a keyboard-first checkbox grid (`↑/↓`/`jk` move,
-  `←/→` between columns, `space` toggle, `a` all, `n` none, `space` on DONE
-  arms it, `enter` installs, `esc` cancels)
-- Installs all picks in one `paru -S --noconfirm` transaction with live output
+  `←/→` between columns, `space` toggle, `a` all, `n` none, `enter` installs,
+  `esc` cancels). **Enter installs from any row** — the DONE row is a visual
+  target, not an arming step (ticking apps and pressing enter used to do
+  nothing at all, which looked like a broken wizard).
+- Installs all picks in one `paru -S --noconfirm --needed` transaction with
+  live output, teed to `~/.local/state/app-wiz4rd/install.log` so the output
+  survives the window closing
 - **Web apps** (an `https://` package line) get a PWA-style desktop launcher
   instead — no install needed
 - Every pick is written to a **pending queue**
@@ -54,7 +58,18 @@ cd app-wiz4rd-0.1.0
 
 ## Offline use
 
-Pick apps with no connection and nothing is lost:
+Starting the picker without a connection offers NetworkManager's own UI
+(`nmtui-connect`) first, so the common case — first boot before Wi-Fi is
+joined — installs immediately instead of queueing everything:
+
+```
+😈 No internet connection.
+   [1] Connect now (NetworkManager text UI)
+   [2] Continue — picks are saved and installed once you are online
+   Choose [1-2] (default: 1):
+```
+
+Picking with no connection loses nothing:
 
 ```
 😈 No internet right now. You can still pick apps:
