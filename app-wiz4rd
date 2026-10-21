@@ -5,10 +5,17 @@
 # This script drives it: resolve the catalog, run the TUI in a terminal, install
 # the picks with paru, and (in --once mode) remember completion.
 #
-# Modes: (no args) run · --once · --config FILE · --install-autostart · --remove-autostart
+# Modes: (no args) run · --once · --resume · --config FILE · --install-autostart
+#        · --remove-autostart
 # Catalog: category|name|package|description (package may be an https:// URL → a
 # web-app launcher). Resolution: --config, ~/.config/syntropia/apps.list,
 # /etc/syntropia/apps.list, apps.list next to the script (or /usr/share/app-wiz4rd).
+#
+# Offline behaviour: every choice is written to a pending queue BEFORE paru is
+# asked to install anything, and only successful installs leave the queue. A
+# run without network therefore loses nothing: the picks wait in
+# ~/.config/syntropia/apps-wizard.pending, --once keeps firing until the queue is
+# empty, and `--resume` installs whatever is still waiting.
 
 set -euo pipefail
 
@@ -18,6 +25,9 @@ PKG_DIR="/usr/share/app-wiz4rd"
 CONFIG_HOME="${XDG_CONFIG_HOME:-$HOME/.config}"
 AUTOSTART_DIR="$CONFIG_HOME/autostart"
 DONE_MARKER="$CONFIG_HOME/syntropia/apps-wizard.done"
+# Choices that still need installing. Its presence is what makes a completed
+# wizard run again — see the --once gate at the bottom.
+PENDING_FILE="$CONFIG_HOME/syntropia/apps-wizard.pending"
 BUNDLED_CATALOG="$SCRIPT_DIR/apps.list"
 [[ -f "$BUNDLED_CATALOG" ]] || BUNDLED_CATALOG="$PKG_DIR/apps.list"
 DESKTOP_TEMPLATE="$SCRIPT_DIR/syntropia-apps.desktop"
@@ -33,9 +43,68 @@ CATALOG=""
 die() { echo "😈 error: $*" >&2; exit 1; }
 have() { command -v "$1" >/dev/null 2>&1; }
 
+# Cheap reachability probe. ICMP first (no curl dependency on a fresh install),
+# DNS as the fallback for networks that drop ping.
+is_online() {
+    if have ping && ping -c1 -W2 -q 1.1.1.1 >/dev/null 2>&1; then
+        return 0
+    fi
+    have getent && getent hosts archlinux.org >/dev/null 2>&1
+}
+
 mark_done() {
     mkdir -p "$(dirname "$DONE_MARKER")"
     touch "$DONE_MARKER"
+}
+
+# --- pending queue --------------------------------------------------------
+
+pending_packages() {
+    [[ -f "$PENDING_FILE" ]] || return 0
+    awk 'NF && !seen[$0]++' "$PENDING_FILE"
+}
+
+pending_count() {
+    pending_packages | wc -l | tr -d '[:space:]'
+}
+
+# queue_pending <package|url>...  — union with what is already queued, order
+# preserved. This runs BEFORE any install attempt: if paru fails, the box loses
+# power, or the network is down, the choice is already on disk.
+queue_pending() {
+    [[ $# -gt 0 ]] || return 0
+    mkdir -p "$(dirname "$PENDING_FILE")"
+    {
+        pending_packages
+        printf '%s\n' "$@"
+    } | awk 'NF && !seen[$0]++' >"$PENDING_FILE.tmp"
+    mv "$PENDING_FILE.tmp" "$PENDING_FILE"
+}
+
+# clear_pending <package|url>... — drop the entries that really installed.
+clear_pending() {
+    [[ $# -gt 0 ]] || return 0
+    [[ -f "$PENDING_FILE" ]] || return 0
+    local -a keep=()
+    local pkg entry handled
+    while IFS= read -r pkg; do
+        [[ -n "$pkg" ]] || continue
+        handled=0
+        for entry in "$@"; do
+            if [[ "$pkg" == "$entry" ]]; then
+                handled=1
+                break
+            fi
+        done
+        if [[ "$handled" -eq 0 ]]; then
+            keep+=("$pkg")
+        fi
+    done < <(pending_packages)
+    if [[ ${#keep[@]} -eq 0 ]]; then
+        rm -f "$PENDING_FILE"
+    else
+        printf '%s\n' "${keep[@]}" >"$PENDING_FILE"
+    fi
 }
 
 # Cancelled / nothing selected — don't mark done, so it can run again later.
@@ -43,7 +112,29 @@ skip_note() {
     echo "😈 Skipped — you can pick apps any time with:"
     echo "  $0"
     if [[ "$MODE" == "once" && -t 0 ]]; then
-        echo; echo "Press Enter to close this window."; read -r _ || true
+        echo
+        echo "Press Enter to close this window."
+        read -r _ || true
+    fi
+}
+
+# How to finish the job when paru could not.
+pending_note() {
+    local count
+    count="$(pending_count)"
+    [[ "$count" == "0" ]] && return 0
+    echo
+    echo "😈 ${count} app(s) are saved and waiting: $PENDING_FILE"
+    if is_online; then
+        echo "   Finish them with:  $0 --resume"
+    else
+        echo "   You are offline. Connect, then either log in again or run:"
+        echo "     $0 --resume"
+    fi
+    if [[ "$MODE" == "once" && -t 0 ]]; then
+        echo
+        echo "Press Enter to close this window."
+        read -r _ || true
     fi
 }
 
@@ -115,73 +206,178 @@ EOF
     echo "  ✅ $name  →  $launcher"
 }
 
-run_dialog() {
-    local cat_file out_file rc row term q relaunch pkg i
-    local selected=() native=() web_names=() web_urls=()
+# Map web-app URLs back to display names (the TUI prints package tags, which for
+# web apps are the URLs).
+load_web_names() {
+    local cat_file row _ name pkg _rest
     cat_file="$(resolve_catalog)"
-    [[ -f "$cat_file" ]] || die "no catalog found: $cat_file"
-    ensure_tui
-
-    # Autostart launches us detached (no TTY) — relaunch inside a terminal;
-    # the inner run then installs inline in that same terminal.
-    if [[ ! -t 0 ]]; then
-        relaunch=("$0")
-        [[ "$MODE" == "once" ]] && relaunch+=(--once)
-        [[ -n "$CATALOG" ]] && relaunch+=(--config "$CATALOG")
-        term="$(find_terminal)" || die "no terminal emulator found — run in a terminal instead: $0"
-        q="$(printf '%q ' "${relaunch[@]}")"
-        launch_terminal "$term" "$q"
-        exit 0
-    fi
-
-    have paru || {
-        echo "Installing paru (sudo will ask for your password)..."
-        sudo pacman -S --noconfirm paru || die "paru is required to install apps"
-    }
-
-    out_file="$(mktemp)"
-    rc=0
-    "$TUI_BIN" "$cat_file" "$out_file" || rc=$?
-    if [[ $rc -ne 0 ]]; then rm -f "$out_file"; skip_note; exit 0; fi
-    while IFS= read -r row; do [[ -z "$row" ]] || selected+=("$row"); done < "$out_file"
-    rm -f "$out_file"
-
-    [[ ${#selected[@]} -gt 0 ]] || { echo "😈 Nothing selected — nothing installed."; skip_note; exit 0; }
-
-    # Map web-app URLs back to display names (the TUI prints package tags,
-    # which for web apps are the URLs).
-    declare -A web_name
+    declare -gA WEB_NAME=()
+    [[ -f "$cat_file" ]] || return 0
     while IFS= read -r row || [[ -n "$row" ]]; do
         row="$(printf '%s' "$row" | sed -E 's/(^|[[:space:]])#.*/\1/')"
         [[ -z "${row//[[:space:]]/}" ]] && continue
-        IFS='|' read -r _ name pkg _ <<< "$row"
-        [[ "$pkg" == http* ]] && web_name["$pkg"]="$name"
-    done < "$cat_file"
-
-    for pkg in "${selected[@]}"; do
+        IFS='|' read -r _ name pkg _rest <<< "$row"
         if [[ "$pkg" == http* ]]; then
-            web_names+=("${web_name[$pkg]:-$pkg}"); web_urls+=("$pkg")
+            WEB_NAME["$pkg"]="$name"
+        fi
+    done < "$cat_file"
+}
+
+# Install everything in the pending queue. Web apps only need a local launcher,
+# so they can succeed offline; native packages need paru and a working mirror.
+# Returns non-zero when anything is still queued afterwards.
+process_pending() {
+    local -a queue=() native=() web_urls=() web_names=()
+    local pkg i
+
+    while IFS= read -r pkg; do queue+=("$pkg"); done < <(pending_packages)
+    if [[ ${#queue[@]} -eq 0 ]]; then
+        echo "Nothing queued — everything is already installed."
+        return 0
+    fi
+
+    load_web_names
+    for pkg in "${queue[@]}"; do
+        if [[ "$pkg" == http* ]]; then
+            web_urls+=("$pkg")
+            web_names+=("${WEB_NAME[$pkg]:-$pkg}")
         else
             native+=("$pkg")
         fi
     done
-
-    if [[ ${#native[@]} -gt 0 ]]; then
-        echo "Installing packages: ${native[*]}"; echo
-        paru -S --noconfirm "${native[@]}" || echo "paru exited with $? — continuing"
-        if [[ "$MODE" == "once" ]]; then
-            echo; echo "Done — press Enter to close this window."; read -r _
-        fi
-    fi
 
     if [[ ${#web_urls[@]} -gt 0 ]]; then
         echo "Creating web app launchers:"
         for i in "${!web_urls[@]}"; do
             create_web_launcher "${web_names[$i]}" "${web_urls[$i]}"
         done
+        clear_pending "${web_urls[@]}"
     fi
 
-    [[ "$MODE" == "once" ]] && mark_done
+    if [[ ${#native[@]} -gt 0 ]]; then
+        if ! have paru; then
+            if ! is_online; then
+                echo "😈 paru is not installed and there is no internet — nothing was installed."
+                pending_note
+                return 1
+            fi
+            echo "Installing paru (sudo will ask for your password)..."
+            if ! sudo pacman -S --noconfirm paru; then
+                echo "😈 could not install paru."
+                pending_note
+                return 1
+            fi
+        fi
+
+        echo "Installing packages: ${native[*]}"
+        echo
+        if paru -S --noconfirm "${native[@]}"; then
+            clear_pending "${native[@]}"
+        else
+            echo
+            echo "😈 paru could not install everything — the picks stay queued, so nothing is lost."
+            pending_note
+            return 1
+        fi
+    fi
+
+    return 0
+}
+
+run_dialog() {
+    local cat_file out_file rc row
+    local -a selected=()
+
+    cat_file="$(resolve_catalog)"
+    [[ -f "$cat_file" ]] || die "no catalog found: $cat_file"
+
+    # Autostart launches us detached (no TTY) — relaunch inside a terminal;
+    # the inner run then installs inline in that same terminal.
+    if [[ ! -t 0 ]]; then
+        local -a relaunch=("$0")
+        [[ "$MODE" == "once" ]] && relaunch+=(--once)
+        [[ -n "$CATALOG" ]] && relaunch+=(--config "$CATALOG")
+        local term q
+        term="$(find_terminal)" || die "no terminal emulator found — run in a terminal instead: $0"
+        q="$(printf '%q ' "${relaunch[@]}")"
+        launch_terminal "$term" "$q"
+        exit 0
+    fi
+
+    ensure_tui
+
+    # Anything queued from an earlier (offline) run is retried first: this is
+    # what makes the first-boot prompt, the app menu and --resume all capable of
+    # finishing the job once a connection exists.
+    local queued
+    queued="$(pending_count)"
+    if [[ "$queued" != "0" ]]; then
+        echo "😈 ${queued} app(s) are still waiting from a previous run."
+        if is_online; then
+            echo "   Installing them now…"
+            echo
+            process_pending || true
+            echo
+        else
+            echo "   You are offline — they stay queued until you are connected."
+            echo
+        fi
+    fi
+    if ! is_online; then
+        echo "😈 No internet right now. You can still pick apps:"
+        echo "   they are saved to a queue and installed next time you are online."
+        echo
+    fi
+
+    out_file="$(mktemp)"
+    rc=0
+    "$TUI_BIN" "$cat_file" "$out_file" || rc=$?
+    if [[ $rc -ne 0 ]]; then
+        rm -f "$out_file"
+        skip_note
+        exit 0
+    fi
+    while IFS= read -r row; do
+        [[ -z "$row" ]] || selected+=("$row")
+    done < "$out_file"
+    rm -f "$out_file"
+
+    if [[ ${#selected[@]} -eq 0 ]]; then
+        echo "😈 Nothing selected — nothing installed."
+        skip_note
+        exit 0
+    fi
+
+    # Durable first: the queue is the record of intent, paru is just the worker.
+    queue_pending "${selected[@]}"
+    echo "Queued ${#selected[@]} choice(s)."
+    echo
+
+    if process_pending; then
+        echo
+        echo "✅ Done."
+        if [[ "$MODE" == "once" ]]; then
+            mark_done
+            echo "Press Enter to close this window."
+            read -r _ || true
+        fi
+    fi
+}
+
+# --resume: install whatever is queued, no picker. This is the re-runnable path
+# the first-boot prompt points at once a connection exists.
+run_resume() {
+    if [[ "$(pending_count)" == "0" ]]; then
+        echo "Nothing pending — all picked apps are installed."
+        return 0
+    fi
+    echo "Resuming the install of $(pending_count) queued app(s)..."
+    echo
+    if process_pending; then
+        echo
+        echo "✅ Done — the queue is empty."
+        mark_done
+    fi
 }
 
 install_autostart() {
@@ -191,7 +387,7 @@ install_autostart() {
     script_path="$SCRIPT_DIR/$(basename "$0")"
     sed "s|@SCRIPT@|$script_path|" "$DESKTOP_TEMPLATE" > "$AUTOSTART_DIR/syntropia-apps.desktop"
     echo "Autostart entry installed: $AUTOSTART_DIR/syntropia-apps.desktop"
-    echo "It will run once on your next login."
+    echo "It will run once on your next login (and again if apps are still pending)."
 }
 
 remove_autostart() {
@@ -202,10 +398,11 @@ remove_autostart() {
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --once) MODE="once"; shift ;;
+        --resume) MODE="resume"; shift ;;
         --config) [[ $# -ge 2 ]] || die "--config needs a file argument"; CATALOG="$2"; shift 2 ;;
         --install-autostart) MODE="install-autostart"; shift ;;
         --remove-autostart)  MODE="remove-autostart"; shift ;;
-        -h|--help) sed -n '2,11p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+        -h|--help) sed -n '2,18p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
         *) die "unknown option: $1 (try --help)" ;;
     esac
 done
@@ -213,8 +410,11 @@ done
 case "$MODE" in
     install-autostart) install_autostart ;;
     remove-autostart)  remove_autostart ;;
+    resume)            run_resume ;;
     *)
-        if [[ "$MODE" == "once" && -f "$DONE_MARKER" ]]; then
+        # Completed only counts when nothing is still queued: a run that chose
+        # apps offline leaves the queue behind, so the next login retries it.
+        if [[ "$MODE" == "once" && -f "$DONE_MARKER" && "$(pending_count)" == "0" ]]; then
             echo "Already completed — remove $DONE_MARKER to run again."
             exit 0
         fi

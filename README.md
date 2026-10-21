@@ -41,11 +41,37 @@ cd app-wiz4rd-0.1.0
 - Installs all picks in one `paru -S --noconfirm` transaction with live output
 - **Web apps** (an `https://` package line) get a PWA-style desktop launcher
   instead — no install needed
+- Every pick is written to a **pending queue**
+  (`~/.config/syntropia/apps-wizard.pending`) *before* `paru` runs, and only
+  packages that really installed leave it — an offline run loses nothing
 - `--once` mode self-disables after a **successful** install (completion
   marker at `~/.config/syntropia/apps-wizard.done`); cancelling never marks
-  done, so you can re-run any time
+  done, so you can re-run any time. While the queue is non-empty, `--once`
+  keeps running on each login until it drains
+- `--resume` installs whatever is queued, without opening the picker
 - `--install-autostart` / `--remove-autostart` manage a one-shot run on the
   next login
+
+## Offline use
+
+Pick apps with no connection and nothing is lost:
+
+```
+😈 No internet right now. You can still pick apps:
+   they are saved to a queue and installed next time you are online.
+...
+Queued 3 choice(s).
+😈 paru could not install everything — the picks stay queued, so nothing is lost.
+
+😈 3 app(s) are saved and waiting: ~/.config/syntropia/apps-wizard.pending
+   You are offline. Connect, then either log in again or run:
+     app-wiz4rd --resume
+```
+
+Once the machine is online, any of these finishes the job: logging in
+(`--once` retries the queue), opening the wizard from the app menu (it retries
+the queue before the picker), or `app-wiz4rd --resume`. Web-app picks only need
+a local launcher, so they are created even offline.
 
 ## The catalog
 
@@ -73,6 +99,9 @@ aur/                    the AUR packaging (PKGBUILD, .SRCINFO)
 ```
 
 ## Requirements
+
+- `paru` is only needed when there is something native to install; missing
+  paru offline simply keeps the queue for later
 
 - Arch-based system (CachyOS, Arch, EndeavourOS…) with `paru` — the wizard
   bootstraps it if missing (it installs paru from the official repos itself)
