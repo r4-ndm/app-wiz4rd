@@ -1,9 +1,11 @@
 // 😈 Syntropia Apps TUI — the glamorous pick-your-apps dialog.
 //
 // A Bubble Tea (Charm ecosystem) dialog: dark glamour theme, category
-// groups, keyboard-first checkbox list. Prints the checked package tags,
-// one per line, to stdout — the same contract as `kdialog --checklist
-// --separate-output` — so the wizard parses it identically. Exit 0 = OK,
+// groups, keyboard-first checkbox list. Enter installs the ticked apps from
+// any row (the Done row is a visual target, not an arming step). Prints the
+// checked package tags one per line to stdout — the same contract as
+// `kdialog --checklist --separate-output` — so the wizard parses it
+// identically. Exit 0 = OK,
 // 1 = cancelled.
 //
 // When an output-file path is given as the second argument, the checked
@@ -180,6 +182,7 @@ type model struct {
 	height   int
 	done     bool
 	cancel   bool
+	note     string // transient one-line feedback (e.g. "nothing selected")
 
 	// grid navigation state (rebuilt when the width changes)
 	ncols     int
@@ -369,23 +372,29 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.cursor = len(m.flat) - 1
 			}
 		case " ":
-			// space toggles: apps get checked/unchecked; the Done row gets
-			// armed/disarmed. It never quits by itself.
+			// space toggles: apps get checked/unchecked. The Done row is a
+			// visible target but no longer a gate — see the enter case.
 			if m.onDone() {
 				m.doneItem.checked = !m.doneItem.checked
 			} else {
 				m.flat[m.cursor].checked = !m.flat[m.cursor].checked
+				m.note = ""
 			}
 		case "enter":
-			// enter only installs once Done has been armed with space
-			if m.onDone() && m.doneItem.checked {
+			// enter always installs whatever is ticked, from any row. The old
+			// flow required arming the Done row with space first, so users who
+			// ticked apps and pressed enter got no install, no output and no
+			// explanation (2026-10-21 laptop install).
+			if m.selectedCount() > 0 {
 				m.done = true
 				return m, tea.Quit
 			}
+			m.note = "nothing selected — press space to tick apps, enter to install"
 		case "a", "A":
 			for _, it := range m.flat {
 				it.checked = true
 			}
+			m.note = ""
 		case "n", "N":
 			for _, it := range m.flat {
 				it.checked = false
@@ -634,10 +643,10 @@ func (m model) View() string {
 	doneBox := "[ ]"
 	doneBoxFg := dimC
 	doneTxt := "DONE — install " + fmt.Sprintf("%d apps", m.selectedCount())
-	if m.doneItem.checked {
+	if m.selectedCount() > 0 {
 		doneBox = "[✓]"
 		doneBoxFg = hot
-		doneTxt = "DONE — install " + fmt.Sprintf("%d apps", m.selectedCount()) + " (press enter)"
+		doneTxt += " (press enter)"
 	}
 	doneBg := bg
 	if m.onDone() {
@@ -658,24 +667,29 @@ func (m model) View() string {
 	var cur *item
 	if m.onDone() {
 		cur = m.doneItem
-		if m.doneItem.checked {
-			cur.desc = "armed — press enter to install the selected apps"
+		if m.selectedCount() > 0 {
+			cur.desc = "press enter to install the ticked apps"
 		} else {
-			cur.desc = "press space to arm, then enter to install"
+			cur.desc = "tick at least one app first (space)"
 		}
 	} else {
 		cur = m.flat[m.cursor]
 	}
-	status := seg(bg, accent, false, "▶ "+cur.name) + seg(bg, dimC, false, "  "+cur.desc)
+	var status string
+	if m.note != "" {
+		status = seg(bg, hot, true, "! "+m.note)
+	} else {
+		status = seg(bg, accent, false, "▶ "+cur.name) + seg(bg, dimC, false, "  "+cur.desc)
+	}
 	status = lipgloss.NewStyle().Background(lipgloss.Color(bg)).Width(innerW).Align(lipgloss.Center).
 		Render(status)
 	count := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color(hot)).
 		Background(lipgloss.Color(bg)).
 		Render(fmt.Sprintf("%d/%d selected", m.selectedCount(), len(m.flat)))
-	hintTxt := "↑/↓ move · ←/→ column · space toggle · a all · n none · space on DONE arms · enter installs · esc cancel"
+	hintTxt := "↑/↓ move · ←/→ column · space toggle · a all · n none · enter installs · esc cancel"
 	if lipgloss.Width(hintTxt)+4+lipgloss.Width(count) > innerW {
 		// narrow terminal: compress the hints so the line never wraps
-		hintTxt = "↑/↓ · ←/→ move · space toggle · space on DONE arms · enter installs · esc"
+		hintTxt = "↑/↓ · ←/→ move · space toggle · enter installs · esc"
 	}
 	hint := lipgloss.NewStyle().Foreground(lipgloss.Color(dimC)).
 		Background(lipgloss.Color(bg)).Render(hintTxt)
