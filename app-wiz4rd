@@ -24,6 +24,8 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # Packaged layout (AUR): the script lives in /usr/bin, assets in /usr/share.
 PKG_DIR="/usr/share/app-wiz4rd"
+# Syntropia-shipped local helpers (e.g. syntropia-ssh-setup), not pacman/AUR packages.
+HELPER_BIN_DIR="${SYNTROPIA_BIN_DIR:-/usr/local/bin}"
 CONFIG_HOME="${XDG_CONFIG_HOME:-$HOME/.config}"
 AUTOSTART_DIR="$CONFIG_HOME/autostart"
 DONE_MARKER="$CONFIG_HOME/syntropia/apps-wizard.done"
@@ -282,12 +284,13 @@ load_web_names() {
     done < "$cat_file"
 }
 
-# Install everything in the pending queue. Web apps only need a local launcher,
-# so they can succeed offline; native packages need paru and a working mirror.
+# Install everything in the pending queue. Web apps only need a local launcher
+# and Syntropia helpers live in $HELPER_BIN_DIR, so neither needs paru; native
+# packages need paru and a working mirror.
 # Returns non-zero when anything is still queued afterwards.
 process_pending() {
-    local -a queue=() native=() web_urls=() web_names=()
-    local pkg i
+    local -a queue=() native=() helpers=() web_urls=() web_names=()
+    local pkg i helper_failed=0
 
     while IFS= read -r pkg; do queue+=("$pkg"); done < <(pending_packages)
     if [[ ${#queue[@]} -eq 0 ]]; then
@@ -300,6 +303,8 @@ process_pending() {
         if [[ "$pkg" == http* ]]; then
             web_urls+=("$pkg")
             web_names+=("${WEB_NAME[$pkg]:-$pkg}")
+        elif [[ "$pkg" == syntropia-* && -x "$HELPER_BIN_DIR/$pkg" ]]; then
+            helpers+=("$pkg")
         else
             native+=("$pkg")
         fi
@@ -311,6 +316,22 @@ process_pending() {
             create_web_launcher "${web_names[$i]}" "${web_urls[$i]}"
         done
         clear_pending "${web_urls[@]}"
+    fi
+
+    if [[ ${#helpers[@]} -gt 0 ]]; then
+        echo "Running Syntropia helpers: ${helpers[*]}"
+        echo "   (the output is also saved to $INSTALL_LOG)"
+        echo
+        for pkg in "${helpers[@]}"; do
+            log "helper $HELPER_BIN_DIR/$pkg"
+            if "$HELPER_BIN_DIR/$pkg" 2>&1 | tee -a "$INSTALL_LOG"; then
+                clear_pending "$pkg"
+            else
+                echo
+                echo "😈 $pkg could not complete — stays queued, so nothing is lost."
+                helper_failed=1
+            fi
+        done
     fi
 
     if [[ ${#native[@]} -gt 0 ]]; then
@@ -335,22 +356,44 @@ process_pending() {
         if paru -S --noconfirm --needed "${native[@]}" 2>&1 | tee -a "$INSTALL_LOG"; then
             clear_pending "${native[@]}"
         else
-            # paru can install most of a transaction and still exit non-zero
-            # (one broken AUR package). Unqueue only what really landed, so the
-            # queue stays the to-do list instead of looping on installed picks.
-            local -a done_pkgs=()
+            # One broken package (stale mirror 404, bad signature, dead AUR
+            # pkgbuild) aborts the whole pacman transaction, so the batch retry
+            # alone would loop forever on the same failure. Fall back to
+            # per-package installs: each pick gets its own transaction, so a
+            # single bad one cannot starve the rest of the queue.
+            echo
+            echo "😈 batch install failed — retrying packages one at a time..."
+            local -a failed_pkgs=()
             local pkg
             for pkg in "${native[@]}"; do
-                if pacman -Q "$pkg" >/dev/null 2>&1; then
-                    done_pkgs+=("$pkg")
+                pacman -Q "$pkg" >/dev/null 2>&1 && continue
+                log "paru -S --noconfirm --needed $pkg (solo retry)"
+                if paru -S --noconfirm --needed "$pkg" 2>&1 | tee -a "$INSTALL_LOG"; then
+                    clear_pending "$pkg"
+                else
+                    failed_pkgs+=("$pkg")
                 fi
             done
-            ((${#done_pkgs[@]})) && clear_pending "${done_pkgs[@]}"
-            echo
-            echo "😈 paru could not install everything — the picks stay queued, so nothing is lost."
-            pending_note
-            return 1
+            # Unqueue whatever landed during the batch attempt before the abort.
+            for pkg in "${native[@]}"; do
+                if pacman -Q "$pkg" >/dev/null 2>&1; then
+                    clear_pending "$pkg"
+                fi
+            done
+            if ((${#failed_pkgs[@]})); then
+                echo
+                echo "😈 could not install: ${failed_pkgs[*]}"
+                echo "   (they stay queued — the wizard retries on next login;"
+                echo "    a stale mirror is the usual cause: run: sudo cachyos-rate-mirrors)"
+                pending_note
+                return 1
+            fi
         fi
+    fi
+
+    if (( helper_failed )); then
+        pending_note
+        return 1
     fi
 
     return 0

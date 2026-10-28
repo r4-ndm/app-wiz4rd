@@ -45,6 +45,10 @@ cd app-wiz4rd-0.1.0
   survives the window closing
 - **Web apps** (an `https://` package line) get a PWA-style desktop launcher
   instead — no install needed
+- **Local helpers** (a `syntropia-<name>` package field that exists as an
+  executable in `/usr/local/bin`, or `$SYNTROPIA_BIN_DIR`) run directly as
+  local helper commands before the `paru` batch, with output teed to
+  `install.log` and each helper unqueued on success
 - Every pick is written to a **pending queue**
   (`~/.config/syntropia/apps-wizard.pending`) *before* `paru` runs, and only
   packages that really installed leave it — an offline run loses nothing
@@ -96,8 +100,11 @@ a local launcher, so they are created even offline.
 category|display name|package|short description
 ```
 
-- `package` = pacman repo **or** AUR package name (paru resolves either), or
-  an `https://` URL for a web app
+- `package` = pacman repo **or** AUR package name (paru resolves either),
+  an `https://` URL for a web app, or a `syntropia-<name>` command that exists
+  in `/usr/local/bin` (run as a local helper before the `paru` batch, each
+  unqueued on success; if not executable in `/usr/local/bin`, it stays in the
+  `paru` batch as a normal package)
 - Copy it to `~/.config/syntropia/apps.list` and edit to make it yours — the
   wizard prefers the user copy over the bundled one
 - New category = just use a new category name on the line
