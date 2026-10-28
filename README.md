@@ -2,9 +2,11 @@
 
 The Syntropia "pick your favorite apps" wizard, standalone edition.
 
-One grouped checkbox TUI (Bubble Tea / Charm ecosystem) that installs
-whatever you check in a single `paru -S` transaction — official-repo and AUR
-packages alike. The catalog is a plain text file, so adding an app is a
+A full-width `fzf` picker (with a 5-line slant `SYNTROPIA` banner, coloured
+category tags, package names, and adaptive description/alias columns) that
+installs whatever you check in a single `paru -S` transaction — official-repo
+and AUR packages alike. When `fzf` is not installed, it degrades gracefully to
+a numbered-list prompt. The catalog is a plain text file, so adding an app is a
 one-line edit.
 
 ## Install
@@ -15,31 +17,23 @@ From the AUR:
 paru -S app-wiz4rd
 ```
 
-Or run straight from a checkout (builds the TUI on demand if `go` is
-installed):
+Or run straight from a checkout:
 
 ```bash
-./app-wiz4rd
-```
-
-Or grab the **zero-install tarball** from the latest GitHub release —
-the prebuilt static TUI is bundled, so no Go and no AUR helper is
-needed:
-
-```bash
-curl -LO https://github.com/r4-ndm/app-wiz4rd/releases/latest/download/app-wiz4rd-0.1.0-x86_64.tar.gz
-tar -xzf app-wiz4rd-0.1.0-x86_64.tar.gz
-cd app-wiz4rd-0.1.0
 ./app-wiz4rd
 ```
 
 ## What it does
 
-- Shows your catalog as a keyboard-first checkbox grid (`↑/↓`/`jk` move,
-  `←/→` between columns, `space` toggle, `a` all, `n` none, `enter` installs,
-  `esc` cancels). **Enter installs from any row** — the DONE row is a visual
-  target, not an arming step (ticking apps and pressing enter used to do
-  nothing at all, which looked like a broken wizard).
+- Opens a full-width `fzf` picker (`--no-preview`, rounded border) with the
+  centred 5-line slant `SYNTROPIA` banner at the top and a three-column list:
+  256-colour category (`%-10s`), bold package name (`%-26s`), and a description
+  column truncated adaptively to terminal width (`desc_w = width - 44`, floor
+  20) plus an optional dimmed `(aliases)` suffix so aliases stay searchable
+  (`SPACE` tick, `ENTER` install, `ESC` cancel, type to filter).
+- **Numbered fallback**: if `fzf` is not installed (or `SYNTROPIA_PICKER_NO_FZF=1`
+  is set), falls back to a numbered list on stderr where you type space-separated
+  numbers (e.g. `1 4 7`) to select apps.
 - Installs all picks in one `paru -S --noconfirm --needed` transaction with
   live output, teed to `~/.local/state/app-wiz4rd/install.log` so the output
   survives the window closing
@@ -97,7 +91,7 @@ a local launcher, so they are created even offline.
 `apps.list`, one app per line:
 
 ```
-category|display name|package|short description
+category|display name|package|short description[|aliases]
 ```
 
 - `package` = pacman repo **or** AUR package name (paru resolves either),
@@ -105,6 +99,9 @@ category|display name|package|short description
   in `/usr/local/bin` (run as a local helper before the `paru` batch, each
   unqueued on success; if not executable in `/usr/local/bin`, it stays in the
   `paru` batch as a normal package)
+- Optional 5th field (`aliases`, e.g. `bw bitwig daw`) is rendered as a dimmed
+  suffix `(bw bitwig daw)` so abbreviations and alternate keywords stay
+  searchable in `fzf`
 - Copy it to `~/.config/syntropia/apps.list` and edit to make it yours — the
   wizard prefers the user copy over the bundled one
 - New category = just use a new category name on the line
@@ -116,18 +113,19 @@ app-wiz4rd              the driver script (/usr/bin/app-wiz4rd when packaged)
 apps.list               the app catalog
 syntropia-apps.desktop  autostart template (used by --install-autostart)
 app-wiz4rd.desktop      app-menu launcher
-dialog/main.go          the TUI source (Bubble Tea; static CGO_ENABLED=0 build)
+dialog/main.go          legacy Go TUI source (no longer used at runtime)
 aur/                    the AUR packaging (PKGBUILD, .SRCINFO)
 ```
 
 ## Requirements
 
+- `fzf` is the only runtime dependency of the interactive full-width picker (if
+  `fzf` is missing, the script automatically falls back to a numbered prompt;
+  the Go TUI is no longer used)
 - `paru` is only needed when there is something native to install; missing
   paru offline simply keeps the queue for later
-
 - Arch-based system (CachyOS, Arch, EndeavourOS…) with `paru` — the wizard
   bootstraps it if missing (it installs paru from the official repos itself)
-- The TUI is a **static Go binary with zero runtime dependencies**
 
 ## License
 

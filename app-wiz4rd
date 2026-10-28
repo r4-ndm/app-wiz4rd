@@ -1,14 +1,15 @@
 #!/usr/bin/env bash
 # 😈 app-wiz4rd — the Syntropia "pick your favorite apps" installer.
 #
-# The UI is the Bubble Tea TUI (dialog/syntropia-apps-tui) — the only frontend.
-# This script drives it: resolve the catalog, run the TUI in a terminal, install
-# the picks with paru, and (in --once mode) remember completion.
+# The UI is a full-width fzf picker (with a numbered-list fallback when fzf is
+# not installed). This script drives it: resolve the catalog, run the picker in
+# a terminal, install the picks with paru, and (in --once mode) remember
+# completion.
 #
 # Modes: (no args) run · --once · --resume · --config FILE · --install-autostart
 #        · --remove-autostart
-# Catalog: category|name|package|description (package may be an https:// URL → a
-# web-app launcher). Resolution: --config, ~/.config/syntropia/apps.list,
+# Catalog: category|name|package|description[|aliases] (package may be an https://
+# URL → a web-app launcher). Resolution: --config, ~/.config/syntropia/apps.list,
 # /etc/syntropia/apps.list, apps.list next to the script (or /usr/share/app-wiz4rd).
 #
 # Offline behaviour: every choice is written to a pending queue BEFORE paru is
@@ -41,10 +42,15 @@ BUNDLED_CATALOG="$SCRIPT_DIR/apps.list"
 [[ -f "$BUNDLED_CATALOG" ]] || BUNDLED_CATALOG="$PKG_DIR/apps.list"
 DESKTOP_TEMPLATE="$SCRIPT_DIR/syntropia-apps.desktop"
 [[ -f "$DESKTOP_TEMPLATE" ]] || DESKTOP_TEMPLATE="$PKG_DIR/syntropia-apps.desktop"
-TUI_BIN="$SCRIPT_DIR/dialog/syntropia-apps-tui"
-[[ -x "$TUI_BIN" ]] || TUI_BIN="$PKG_DIR/dialog/syntropia-apps-tui"
-[[ -x "$TUI_BIN" ]] || TUI_BIN="$(command -v syntropia-apps-tui 2>/dev/null || true)"
-[[ -n "$TUI_BIN" && -x "$TUI_BIN" ]] || TUI_BIN="/usr/local/bin/syntropia-apps-tui"
+
+BANNER="$(cat <<'BANNER_EOF'
+   _______  ___   ____________  ____  ____  _______
+  / ___/\ \/ / | / /_  __/ __ \/ __ \/ __ \/  _/   |
+  \__ \  \  /  |/ / / / / /_/ / / / / /_/ // // /| |
+ ___/ /  / / /|  / / / / _, _/ /_/ / ____// // ___ |
+/____/  /_/_/ |_/ /_/ /_/ |_|\____/_/   /___/_/  |_|
+BANNER_EOF
+)"
 
 MODE="interactive"
 CATALOG=""
@@ -231,16 +237,83 @@ launch_terminal() {
     nohup "${arr[@]}" >/dev/null 2>&1 &
 }
 
-ensure_tui() {
-    [[ -x "$TUI_BIN" ]] && return 0
-    local src_dir
-    src_dir="$(dirname "$TUI_BIN")"
-    if have go && [[ -f "$src_dir/main.go" ]]; then
-        echo "Building the app-wiz4rd TUI (one-time, needs go)..."
-        ( cd "$src_dir" && CGO_ENABLED=0 go build -o syntropia-apps-tui . ) || return 1
-        return 0
+# rows: display<TAB>package<TAB>description<TAB>category<TAB>aliases
+rows() {
+    local cat_file="${1:-$(resolve_catalog)}"
+    local width="${COLUMNS:-$(tput cols 2>/dev/null || echo 100)}"
+    awk -F'|' -v width="$width" '
+        BEGIN {
+            desc_w = width - 44
+            if (desc_w < 20) desc_w = 20
+            c["Syntropia"] = "\033[1;38;5;117m"
+            c["Chat"]      = "\033[38;5;80m"
+            c["Browser"]   = "\033[38;5;75m"
+            c["DAW"]       = "\033[38;5;177m"
+            c["Audio"]     = "\033[38;5;114m"
+            c["AI"]        = "\033[38;5;221m"
+            c["Terminal"]  = "\033[38;5;250m"
+            c["CLI"]       = "\033[38;5;245m"
+            c["Video"]     = "\033[38;5;203m"
+            c["Graphics"]  = "\033[38;5;214m"
+            c["Privacy"]   = "\033[38;5;141m"
+            c["Wallet"]    = "\033[38;5;186m"
+            c["Remote"]    = "\033[38;5;78m"
+            reset          = "\033[0m"
+        }
+        NF >= 4 && $1 !~ /^[[:space:]]*#/ && $1 != "" {
+            colour  = ($1 in c) ? c[$1] : "\033[38;5;245m"
+            desc    = substr($4, 1, desc_w)
+            aliases = (NF >= 5) ? $5 : ""
+            suffix  = (aliases != "") ? sprintf(" \033[2m(%s)\033[0m", aliases) : ""
+            printf "%s%-10s%s \033[1m%-26s\033[0m %s%s\t%s\t%s\t%s\t%s\n", \
+                colour, $1, reset, $3, desc, suffix, $3, $4, $1, aliases
+        }
+    ' "$cat_file"
+}
+
+# Centre a block of text to the current terminal width.
+centre() {
+    local cols="${COLUMNS:-$(tput cols 2>/dev/null || echo 100)}" line pad
+    while IFS= read -r line; do
+        pad=$(( (cols - ${#line}) / 2 ))
+        (( pad < 0 )) && pad=0
+        printf '%*s%s\n' "$pad" '' "$line"
+    done
+}
+
+picker() {
+    local cat_file="${1:-$(resolve_catalog)}"
+    if [[ -z "${SYNTROPIA_PICKER_NO_FZF:-}" ]] && command -v fzf >/dev/null 2>&1; then
+        rows "$cat_file" | fzf --multi --reverse --height=100% --no-sort --ansi \
+            --border=rounded \
+            --separator='─' --scrollbar='▐' --highlight-line \
+            --info=inline-right \
+            --color='bg+:#1b1f27,fg+:#ffffff,hl:#7aa2f7,hl+:#7aa2f7:bold,pointer:#7aa2f7,marker:#9ece6a,prompt:#bb9af7,header:#565f89,border:#3b4261,label:#7aa2f7,info:#565f89' \
+            --delimiter='\t' --with-nth=1 \
+            --pointer='▶' --marker='✓' \
+            --header="$(printf '%s\n\n%s' "$(centre <<< "$BANNER")" "         SPACE tick   ·   ENTER install   ·   ESC cancel   ·   type to filter")" \
+            --header-first \
+            --no-preview
+        return
     fi
-    die "TUI not found — build it: cd $src_dir && go build -o syntropia-apps-tui ."
+    echo "fzf not installed — numbered mode. Type numbers, e.g. 1 4 7" >&2
+    printf '%s\n\n' "$BANNER" >&2
+    local i=0 line pkg
+    declare -A pick_map=()
+    while IFS=$'\t' read -r line pkg _; do
+        i=$((i + 1))
+        pick_map[$i]="$line"$'\t'"$pkg"
+        printf '%3d  %s\n' "$i" "$line" >&2
+    done < <(rows "$cat_file")
+    echo >&2
+    local -a chosen=() answer
+    read -r -p "install (numbers, blank to cancel): " answer || true
+    [[ -n "$answer" ]] || return 0
+    for n in $answer; do
+        [[ -n "${pick_map[$n]:-}" ]] && chosen+=("${pick_map[$n]}")
+    done
+    ((${#chosen[@]})) && printf '%s\n' "${chosen[@]}"
+    return 0
 }
 
 create_web_launcher() {
@@ -400,7 +473,7 @@ process_pending() {
 }
 
 run_dialog() {
-    local cat_file out_file rc row
+    local cat_file selection pkg rc
     local -a selected=()
 
     cat_file="$(resolve_catalog)"
@@ -408,7 +481,7 @@ run_dialog() {
 
     # Autostart launches us detached (no TTY) — relaunch inside a terminal;
     # the inner run then installs inline in that same terminal.
-    if [[ ! -t 0 ]]; then
+    if [[ ! -t 0 && -z "${SYNTROPIA_PICKER_NO_FZF:-}" ]]; then
         local -a relaunch=("$0")
         [[ "$MODE" == "once" ]] && relaunch+=(--once)
         [[ "$MODE" == "resume" ]] && relaunch+=(--resume)
@@ -427,8 +500,6 @@ run_dialog() {
         launch_terminal "$term" "$q"
         exit 0
     fi
-
-    ensure_tui
 
     log "run mode=$MODE catalog=$cat_file"
 
@@ -458,18 +529,15 @@ run_dialog() {
         echo
     fi
 
-    out_file="$(mktemp)"
     rc=0
-    "$TUI_BIN" "$cat_file" "$out_file" || rc=$?
+    selection="$(picker "$cat_file")" || rc=$?
     if [[ $rc -ne 0 ]]; then
-        rm -f "$out_file"
         skip_note
         exit 0
     fi
-    while IFS= read -r row; do
-        [[ -z "$row" ]] || selected+=("$row")
-    done < "$out_file"
-    rm -f "$out_file"
+    while IFS=$'\t' read -r _ pkg _; do
+        [[ -n "${pkg:-}" ]] && selected+=("$pkg")
+    done <<< "$selection"
 
     if [[ ${#selected[@]} -eq 0 ]]; then
         echo "😈 Nothing selected — nothing installed."
