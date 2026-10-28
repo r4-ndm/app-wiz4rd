@@ -3,7 +3,7 @@
 #
 # The UI is a full-width fzf picker (with a numbered-list fallback when fzf is
 # not installed). This script drives it: resolve the catalog, run the picker in
-# a terminal, install the picks with paru, and (in --once mode) remember
+# a terminal, install the picks with yay, and (in --once mode) remember
 # completion.
 #
 # Modes: (no args) run · --once · --resume · --config FILE · --install-autostart
@@ -12,7 +12,7 @@
 # URL → a web-app launcher). Resolution: --config, ~/.config/syntropia/apps.list,
 # /etc/syntropia/apps.list, apps.list next to the script (or /usr/share/app-wiz4rd).
 #
-# Offline behaviour: every choice is written to a pending queue BEFORE paru is
+# Offline behaviour: every choice is written to a pending queue BEFORE yay is
 # asked to install anything, and only successful installs leave the queue. A
 # run without network therefore loses nothing: the picks wait in
 # ~/.config/syntropia/apps-wizard.pending, --once keeps firing until the queue is
@@ -96,7 +96,7 @@ pending_count() {
 }
 
 # queue_pending <package|url>...  — union with what is already queued, order
-# preserved. This runs BEFORE any install attempt: if paru fails, the box loses
+# preserved. This runs BEFORE any install attempt: if yay fails, the box loses
 # power, or the network is down, the choice is already on disk.
 queue_pending() {
     [[ $# -gt 0 ]] || return 0
@@ -145,7 +145,7 @@ skip_note() {
     fi
 }
 
-# How to finish the job when paru could not.
+# How to finish the job when yay could not.
 pending_note() {
     local count
     count="$(pending_count)"
@@ -306,6 +306,7 @@ picker() {
             --color='bg+:#1b1f27,fg+:#ffffff,hl:#7aa2f7,hl+:#7aa2f7:bold,pointer:#7aa2f7,marker:#9ece6a,prompt:#bb9af7,header:#565f89,border:#3b4261,label:#7aa2f7,info:#565f89' \
             --delimiter='\t' --with-nth=1 \
             --pointer='▶' --marker='✓' \
+            --bind 'space:toggle+down,tab:toggle+down' \
             --header="$(printf '%s\n\n%s' "$(centre <<< "$BANNER")" "         SPACE tick   ·   ENTER install   ·   ESC cancel   ·   type to filter")" \
             --header-first \
             --no-preview
@@ -373,8 +374,8 @@ load_web_names() {
 }
 
 # Install everything in the pending queue. Web apps only need a local launcher
-# and Syntropia helpers live in $HELPER_BIN_DIR, so neither needs paru; native
-# packages need paru and a working mirror.
+# and Syntropia helpers live in $HELPER_BIN_DIR, so neither needs yay; native
+# packages need yay and a working mirror.
 # Returns non-zero when anything is still queued afterwards.
 process_pending() {
     local -a queue=() native=() helpers=() web_urls=() web_names=()
@@ -423,15 +424,15 @@ process_pending() {
     fi
 
     if [[ ${#native[@]} -gt 0 ]]; then
-        if ! have paru; then
+        if ! have yay; then
             if ! is_online; then
-                echo "😈 paru is not installed and there is no internet — nothing was installed."
+                echo "😈 yay is not installed and there is no internet — nothing was installed."
                 pending_note
                 return 1
             fi
-            echo "Installing paru (sudo will ask for your password)..."
-            if ! sudo pacman -S --noconfirm paru; then
-                echo "😈 could not install paru."
+            echo "Installing yay (sudo will ask for your password)..."
+            if ! sudo pacman -S --noconfirm yay; then
+                echo "😈 could not install yay."
                 pending_note
                 return 1
             fi
@@ -440,8 +441,8 @@ process_pending() {
         echo "Installing packages: ${native[*]}"
         echo "   (the output is also saved to $INSTALL_LOG)"
         echo
-        log "paru -S --noconfirm --needed ${native[*]}"
-        if paru -S --noconfirm --needed "${native[@]}" 2>&1 | tee -a "$INSTALL_LOG"; then
+        log "yay -S --noconfirm --needed ${native[*]}"
+        if yay -S --noconfirm --needed "${native[@]}" 2>&1 | tee -a "$INSTALL_LOG"; then
             clear_pending "${native[@]}"
         else
             # One broken package (stale mirror 404, bad signature, dead AUR
@@ -455,8 +456,8 @@ process_pending() {
             local pkg
             for pkg in "${native[@]}"; do
                 pacman -Q "$pkg" >/dev/null 2>&1 && continue
-                log "paru -S --noconfirm --needed $pkg (solo retry)"
-                if paru -S --noconfirm --needed "$pkg" 2>&1 | tee -a "$INSTALL_LOG"; then
+                log "yay -S --noconfirm --needed $pkg (solo retry)"
+                if yay -S --noconfirm --needed "$pkg" 2>&1 | tee -a "$INSTALL_LOG"; then
                     clear_pending "$pkg"
                 else
                     failed_pkgs+=("$pkg")
@@ -560,7 +561,7 @@ run_dialog() {
         exit 0
     fi
 
-    # Durable first: the queue is the record of intent, paru is just the worker.
+    # Durable first: the queue is the record of intent, yay is just the worker.
     queue_pending "${selected[@]}"
     echo "Queued ${#selected[@]} choice(s)."
     log "picked: ${selected[*]}"
