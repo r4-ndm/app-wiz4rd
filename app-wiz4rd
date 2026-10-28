@@ -299,18 +299,39 @@ centre() {
 picker() {
     local cat_file="${1:-$(resolve_catalog)}"
     if [[ -z "${SYNTROPIA_PICKER_NO_FZF:-}" ]] && command -v fzf >/dev/null 2>&1; then
-        rows "$cat_file" | fzf --multi --reverse --height=100% --no-sort --ansi \
-            --border=rounded \
-            --separator='─' --scrollbar='▐' --highlight-line \
-            --info=inline-right \
-            --color='bg+:#1b1f27,fg+:#ffffff,hl:#7aa2f7,hl+:#7aa2f7:bold,pointer:#7aa2f7,marker:#9ece6a,prompt:#bb9af7,header:#565f89,border:#3b4261,label:#7aa2f7,info:#565f89' \
-            --delimiter='\t' --with-nth=1 \
-            --pointer='▶' --marker='✓' \
-            --bind 'space:toggle+down,tab:toggle+down' \
-            --header="$(printf '%s\n\n%s' "$(centre <<< "$BANNER")" "         SPACE tick   ·   ENTER install   ·   ESC cancel   ·   type to filter")" \
-            --header-first \
-            --no-preview
-        return
+        # {+} = the ticked rows only. Capturing it separately is the only way to
+        # tell "ENTER with 3 apps ticked" from "ENTER with nothing ticked", where
+        # fzf would otherwise hand back the row under the cursor and install it.
+        local ticked rc
+        ticked="$(mktemp)"
+        while true; do
+            : > "$ticked"
+            rows "$cat_file" | fzf --multi --reverse --height=100% --no-sort --ansi \
+                --border=rounded \
+                --separator='─' --scrollbar='▐' --highlight-line \
+                --info=inline-right \
+                --color='bg+:#1b1f27,fg+:#ffffff,hl:#7aa2f7,hl+:#7aa2f7:bold,pointer:#7aa2f7,marker:#9ece6a,prompt:#bb9af7,header:#565f89,border:#3b4261,info:#565f89' \
+                --delimiter='\t' --with-nth=1 \
+                --pointer='▶' --marker='✓' \
+                --bind 'space:toggle+down,tab:toggle+down' \
+                --bind "enter:execute-silent(printf '%s\\n' {+} > $ticked)+accept" \
+                --header="$(printf '%s\n\n%s' "$(centre <<< "$BANNER")" "         SPACE tick   ·   ENTER install   ·   ESC cancel   ·   type to filter")" \
+                --header-first \
+                --no-preview >/dev/null
+            rc=$?
+            if (( rc != 0 )); then
+                rm -f "$ticked"
+                return 1
+            fi
+            if [[ -s "$ticked" ]]; then
+                cat "$ticked"
+                rm -f "$ticked"
+                return 0
+            fi
+            echo
+            echo "😈 nothing ticked — SPACE to tick, ENTER to install, ESC to cancel."
+            sleep 1
+        done
     fi
     echo "fzf not installed — numbered mode. Type numbers, e.g. 1 4 7" >&2
     printf '%s\n\n' "$BANNER" >&2
@@ -559,6 +580,29 @@ run_dialog() {
         echo "😈 Nothing selected — nothing installed."
         skip_note
         exit 0
+    fi
+
+    # Confirm before anything touches the system. The rows are "display<TAB>
+    # package<TAB>...", so field 2 is what gets installed. Skipped when there is
+    # no tty (autostart relaunch, scripted runs) — those already picked apps.
+    if [[ -t 0 ]]; then
+        local row
+        echo
+        echo "😈 Ready to install ${#selected[@]} app(s):"
+        for row in "${selected[@]}"; do
+            printf '   %s\n' "$(printf '%s' "$row" | cut -f1 | cut -c1-100)"
+        done
+        echo
+        local reply
+        read -r -p "Proceed? [Y/n] " reply || reply=""
+        case "${reply:-Y}" in
+            [Yy]*|"") ;;
+            *)
+                echo "Cancelled — nothing installed."
+                exit 0
+                ;;
+        esac
+        echo
     fi
 
     # Durable first: the queue is the record of intent, yay is just the worker.
