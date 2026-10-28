@@ -210,7 +210,7 @@ resolve_catalog() {
 find_terminal() {
     [[ -n "${TERMINAL:-}" ]] && have "$TERMINAL" && { echo "$TERMINAL"; return; }
     local t
-    for t in konsole alacritty kitty ghostty foot wezterm \
+    for t in kitty ghostty foot alacritty wezterm konsole \
         gnome-terminal kgx xfce4-terminal x-terminal-emulator xterm \
         xdg-terminal-exec; do
         have "$t" && { echo "$t"; return; }
@@ -221,14 +221,14 @@ find_terminal() {
 launch_terminal() {
     local term="$1" inner="$2" arr
     case "$term" in
-        konsole)        arr=(konsole -e bash -c "$inner") ;;
+        konsole)        arr=(konsole --geometry 110x34 -e bash -c "$inner") ;;
         gnome-terminal) arr=(gnome-terminal -- bash -c "$inner") ;;
         kgx)            arr=(kgx -- bash -c "$inner") ;;
         xfce4-terminal) arr=(xfce4-terminal -x bash -c "$inner") ;;
-        kitty)          arr=(kitty bash -c "$inner") ;;
-        alacritty)      arr=(alacritty -e bash -c "$inner") ;;
-        ghostty)        arr=(ghostty -e bash -c "$inner") ;;
-        foot)           arr=(foot bash -c "$inner") ;;
+        kitty)          arr=(kitty --override initial_window_width=110c --override initial_window_height=34c bash -c "$inner") ;;
+        alacritty)      arr=(alacritty -o window.dimensions.columns=110 -o window.dimensions.lines=34 -e bash -c "$inner") ;;
+        ghostty)        arr=(ghostty --window-width=110 --window-height=34 -e bash -c "$inner") ;;
+        foot)           arr=(foot --window-size-chars=110x34 bash -c "$inner") ;;
         wezterm)        arr=(wezterm start -- bash -c "$inner") ;;
         xdg-terminal-exec) arr=(xdg-terminal-exec bash -c "$inner") ;;
         *)              [[ -n "${TERMINAL:-}" ]] || return 1
@@ -240,7 +240,9 @@ launch_terminal() {
 # rows: display<TAB>package<TAB>description<TAB>category<TAB>aliases
 rows() {
     local cat_file="${1:-$(resolve_catalog)}"
-    local width="${COLUMNS:-$(tput cols 2>/dev/null || echo 100)}"
+    local width
+    width="$(tput cols 2>/dev/null || true)"
+    [[ -n "$width" ]] || width="${COLUMNS:-100}"
     awk -F'|' -v width="$width" '
         BEGIN {
             # 10 (category) + 1 + 26 (package) + 1 = 38, plus the fzf pointer
@@ -284,7 +286,9 @@ rows() {
 
 # Centre a block of text to the current terminal width.
 centre() {
-    local cols="${COLUMNS:-$(tput cols 2>/dev/null || echo 100)}" line pad
+    local cols line pad
+    cols="$(tput cols 2>/dev/null || true)"
+    [[ -n "$cols" ]] || cols="${COLUMNS:-100}"
     while IFS= read -r line; do
         pad=$(( (cols - ${#line}) / 2 ))
         (( pad < 0 )) && pad=0
