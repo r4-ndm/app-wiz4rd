@@ -243,8 +243,11 @@ rows() {
     local width="${COLUMNS:-$(tput cols 2>/dev/null || echo 100)}"
     awk -F'|' -v width="$width" '
         BEGIN {
-            desc_w = width - 44
-            if (desc_w < 20) desc_w = 20
+            # 10 (category) + 1 + 26 (package) + 1 = 38, plus the fzf pointer
+            # and marker gutter and the rounded border: keep 6 columns of slack
+            # so a full row never wraps.
+            desc_w = width - 44 - 6
+            if (desc_w < 16) desc_w = 16
             c["Syntropia"] = "\033[1;38;5;117m"
             c["Chat"]      = "\033[38;5;80m"
             c["Browser"]   = "\033[38;5;75m"
@@ -262,9 +265,17 @@ rows() {
         }
         NF >= 4 && $1 !~ /^[[:space:]]*#/ && $1 != "" {
             colour  = ($1 in c) ? c[$1] : "\033[38;5;245m"
-            desc    = substr($4, 1, desc_w)
             aliases = (NF >= 5) ? $5 : ""
             suffix  = (aliases != "") ? sprintf(" \033[2m(%s)\033[0m", aliases) : ""
+            # The alias suffix is appended AFTER the description, so its visible
+            # length (" (aliases)") comes out of the description budget, or the
+            # row overruns the terminal and wraps.
+            avail = desc_w
+            if (aliases != "") {
+                avail = desc_w - length(aliases) - 3
+                if (avail < 12) avail = 12
+            }
+            desc = substr($4, 1, avail)
             printf "%s%-10s%s \033[1m%-26s\033[0m %s%s\t%s\t%s\t%s\t%s\n", \
                 colour, $1, reset, $3, desc, suffix, $3, $4, $1, aliases
         }
