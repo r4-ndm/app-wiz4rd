@@ -582,10 +582,10 @@ run_dialog() {
         exit 0
     fi
 
-    # Confirm before anything touches the system. The rows are "display<TAB>
-    # package<TAB>...", so field 2 is what gets installed. Skipped when there is
-    # no tty (autostart relaunch, scripted runs) — those already picked apps.
-    if [[ -t 0 ]]; then
+    # Confirm before anything touches the system. Skipped when there is no tty
+    # (autostart relaunch) or when SYNTROPIA_WIZARD_ASSUME_YES is set, which the
+    # test harness uses to drive the picker without answering prompts.
+    if [[ -t 0 && -z "${SYNTROPIA_WIZARD_ASSUME_YES:-}" ]]; then
         local row
         echo
         echo "😈 Ready to install ${#selected[@]} app(s):"
