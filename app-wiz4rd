@@ -302,11 +302,16 @@ picker() {
         # {+} = the ticked rows only. Capturing it separately is the only way to
         # tell "ENTER with 3 apps ticked" from "ENTER with nothing ticked", where
         # fzf would otherwise hand back the row under the cursor and install it.
-        local ticked rc
+        # {+} = the ticked rows only; fzf otherwise hands back the row under
+        # the cursor, so ENTER with nothing ticked would install it. A marker
+        # file records that ENTER fired at all: if it is missing (stub fzf in
+        # tests, or an fzf too old for execute-silent) we fall back to stdout.
+        local ticked rc out
         ticked="$(mktemp)"
         while true; do
             : > "$ticked"
-            rows "$cat_file" | fzf --multi --reverse --height=100% --no-sort --ansi \
+            rm -f "$ticked.go"
+            out="$(rows "$cat_file" | fzf --multi --reverse --height=100% --no-sort --ansi \
                 --border=rounded \
                 --separator='─' --scrollbar='▐' --highlight-line \
                 --info=inline-right \
@@ -314,23 +319,35 @@ picker() {
                 --delimiter='\t' --with-nth=1 \
                 --pointer='▶' --marker='✓' \
                 --bind 'space:toggle+down,tab:toggle+down' \
-                --bind "enter:execute-silent(printf '%s\\n' {+} > $ticked)+accept" \
+                --bind "enter:execute-silent(printf '%s\\n' {+} > $ticked; touch $ticked.go)+accept" \
                 --header="$(printf '%s\n\n%s' "$(centre <<< "$BANNER")" "         SPACE tick   ·   ENTER install   ·   ESC cancel   ·   type to filter")" \
                 --header-first \
-                --no-preview >/dev/null
+                --no-preview)"
             rc=$?
             if (( rc != 0 )); then
-                rm -f "$ticked"
+                rm -f "$ticked" "$ticked.go"
                 return 1
             fi
-            if [[ -s "$ticked" ]]; then
-                cat "$ticked"
+            if [[ -f "$ticked.go" ]]; then
+                # Real fzf: only what was ticked counts.
+                if [[ -s "$ticked" ]]; then
+                    cat "$ticked"
+                    rm -f "$ticked" "$ticked.go"
+                    return 0
+                fi
+                echo
+                echo "😈 nothing ticked — SPACE to tick, ENTER to install, ESC to cancel."
+                sleep 1
+                continue
+            fi
+            # No marker: fzf did not run our ENTER binding — trust its stdout.
+            if [[ -n "$out" ]]; then
+                printf '%s\n' "$out"
                 rm -f "$ticked"
                 return 0
             fi
-            echo
-            echo "😈 nothing ticked — SPACE to tick, ENTER to install, ESC to cancel."
-            sleep 1
+            rm -f "$ticked"
+            return 1
         done
     fi
     echo "fzf not installed — numbered mode. Type numbers, e.g. 1 4 7" >&2
