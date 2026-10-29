@@ -54,6 +54,7 @@ BANNER_EOF
 
 MODE="interactive"
 CATALOG=""
+WIZARD_CONFIRMED_FILE=""
 
 die() { echo "😈 error: $*" >&2; exit 1; }
 have() { command -v "$1" >/dev/null 2>&1; }
@@ -299,54 +300,123 @@ centre() {
 picker() {
     local cat_file="${1:-$(resolve_catalog)}"
     if [[ -z "${SYNTROPIA_PICKER_NO_FZF:-}" ]] && command -v fzf >/dev/null 2>&1; then
-        # {+} = the ticked rows only. Capturing it separately is the only way to
-        # tell "ENTER with 3 apps ticked" from "ENTER with nothing ticked", where
-        # fzf would otherwise hand back the row under the cursor and install it.
-        # {+} = the ticked rows only; fzf otherwise hands back the row under
-        # the cursor, so ENTER with nothing ticked would install it. A marker
-        # file records that ENTER fired at all: if it is missing (stub fzf in
-        # tests, or an fzf too old for execute-silent) we fall back to stdout.
-        local ticked rc out
-        ticked="$(mktemp)"
+        # fzf cannot tell "nothing ticked" from "the row under the cursor": with
+        # an empty selection, {+} expands to the current row. So the ticked set is
+        # maintained here, by the toggle bindings, in $picked — that is also what
+        # lets the Proceed prompt run INSIDE fzf (0.53+ "transform"), which keeps
+        # every tick and the cursor position when the answer is "no".
+        local picked decision confirm_script toggle_script enter_bind toggle_bind rc out
+        picked="$(mktemp)"
+        decision="$(mktemp)"
+        confirm_script="$(mktemp)"
+        toggle_script="$(mktemp)"
+        cat >"$toggle_script" <<'EOS'
+#!/usr/bin/env bash
+# $1 = ticked-set file, $2 = row. Flips the row in the set.
+state="$1"; row="$2"
+[[ -n "$row" ]] || exit 0
+tmp="$state.$$"
+if grep -Fqx -- "$row" "$state" 2>/dev/null; then
+    grep -Fvx -- "$row" "$state" >"$tmp" 2>/dev/null || :
+else
+    { cat "$state" 2>/dev/null; printf '%s\n' "$row"; } >"$tmp"
+fi
+mv "$tmp" "$state"
+EOS
+        chmod +x "$toggle_script"
+        cat >"$confirm_script" <<'EOS'
+#!/usr/bin/env bash
+# $1 = ticked-set file, $2 = decision file, $3 = confirmed marker path.
+# Reads and writes /dev/tty explicitly: fzf runs this from inside $(...), where
+# stdin is not the terminal.
+set_file="$1"; decision="$2"; confirmed="${3:-}"
+printf 'n' >"$decision"
+count=$(grep -c . "$set_file" 2>/dev/null || true)
+: "${count:=0}"
+if (( count == 0 )); then
+    printf '\n\033[1m😈 Nothing ticked — SPACE to tick, ENTER to install, ESC to cancel.\033[0m\n' >/dev/tty
+    exit 0
+fi
+if [[ -n "${SYNTROPIA_WIZARD_ASSUME_YES:-}" ]]; then
+    printf 'y' >"$decision"
+    [[ -n "$confirmed" ]] && printf 'y' >"$confirmed"
+    exit 0
+fi
+{
+    printf '\n\033[1m😈 Ready to install %s app(s):\033[0m\n' "$count"
+    cut -f1 "$set_file" | cut -c1-100 | sed 's/^/   /'
+    printf '\n'
+} >/dev/tty
+printf 'Proceed? [Y/n] ' >/dev/tty
+reply=""
+IFS= read -r reply </dev/tty || reply=""
+case "${reply:-Y}" in
+    [Yy]*|"")
+        printf 'y' >"$decision"
+        [[ -n "$confirmed" ]] && printf 'y' >"$confirmed"
+        ;;
+    *)
+        printf '\033[0m\nOK — back to the picker. (ESC there cancels.)\n' >/dev/tty
+        ;;
+esac
+EOS
+        chmod +x "$confirm_script"
+        # `transform` landed in fzf 0.53; --help does not list action names, so
+        # detect by version rather than by grepping usage output.
+        local fzf_ver="" fzf_ok=0
+        fzf_ver="$(fzf --version 2>/dev/null | awk '{print $1}')"
+        if [[ "$fzf_ver" =~ ^([0-9]+)\.([0-9]+) ]]; then
+            if (( BASH_REMATCH[1] > 0 || BASH_REMATCH[2] >= 53 )); then
+                fzf_ok=1
+            fi
+        fi
+        if (( fzf_ok )); then
+            toggle_bind="space:toggle+execute-silent($toggle_script $picked {})+down,tab:toggle+execute-silent($toggle_script $picked {})+down,btab:toggle+execute-silent($toggle_script $picked {})+up"
+            enter_bind="enter:execute($confirm_script $picked $decision ${WIZARD_CONFIRMED_FILE:-})+transform:[[ \"\$(cat $decision 2>/dev/null)\" == y ]] && echo accept || echo ignore"
+        else
+            toggle_bind="space:toggle+down,tab:toggle+down"
+            enter_bind="enter:execute-silent(printf '%s\\n' {+} > $picked; touch $picked.go)+accept"
+        fi
         while true; do
-            : > "$ticked"
-            rm -f "$ticked.go"
-            out="$(rows "$cat_file" | fzf --multi --reverse --height=100% --no-sort --ansi \
+            : > "$picked"
+            printf 'n' > "$decision"
+            rm -f "$picked.go"
+            out="$(rows "$cat_file" | SHELL="${BASH:-/bin/bash}" fzf --multi --reverse --height=100% --no-sort --ansi \
                 --border=rounded \
                 --separator='─' --scrollbar='▐' --highlight-line \
                 --info=inline-right \
                 --color='bg+:#1b1f27,fg+:#ffffff,hl:#7aa2f7,hl+:#7aa2f7:bold,pointer:#7aa2f7,marker:#9ece6a,prompt:#bb9af7,header:#565f89,border:#3b4261,info:#565f89,selected-bg:#2a3244' \
                 --delimiter='\t' --with-nth=1 \
                 --pointer='▶' --marker='✓' \
-                --bind 'space:toggle+down,tab:toggle+down' \
-                --bind "enter:execute-silent(printf '%s\\n' {+} > $ticked; touch $ticked.go)+accept" \
+                --bind "$toggle_bind" \
+                --bind "$enter_bind" \
                 --header="$(printf '%s\n\n%s' "$(centre <<< "$BANNER")" "         SPACE tick   ·   ENTER install   ·   ESC cancel   ·   type to filter")" \
                 --header-first \
                 --no-preview)"
             rc=$?
             if (( rc != 0 )); then
-                rm -f "$ticked" "$ticked.go"
+                rm -f "$picked" "$picked.go" "$decision" "$confirm_script" "$toggle_script"
                 return 1
             fi
-            if [[ -f "$ticked.go" ]]; then
-                # Real fzf: only what was ticked counts.
-                if [[ -s "$ticked" ]]; then
-                    cat "$ticked"
-                    rm -f "$ticked" "$ticked.go"
-                    return 0
-                fi
+            if [[ -s "$picked" ]]; then
+                cat "$picked"
+                rm -f "$picked" "$picked.go" "$decision" "$confirm_script" "$toggle_script"
+                return 0
+            fi
+            if [[ -f "$picked.go" ]]; then
                 echo
                 echo "😈 nothing ticked — SPACE to tick, ENTER to install, ESC to cancel."
                 sleep 1
                 continue
             fi
-            # No marker: fzf did not run our ENTER binding — trust its stdout.
+            # No marker and nothing tracked: a stub fzf (or one without our
+            # bindings) accepted — trust its stdout.
             if [[ -n "$out" ]]; then
                 printf '%s\n' "$out"
-                rm -f "$ticked"
+                rm -f "$picked" "$picked.go" "$decision" "$confirm_script" "$toggle_script"
                 return 0
             fi
-            rm -f "$ticked"
+            rm -f "$picked" "$picked.go" "$decision" "$confirm_script" "$toggle_script"
             return 1
         done
     fi
@@ -586,11 +656,14 @@ run_dialog() {
     # Pick -> confirm -> install, and on "no" go straight back to the picker
     # instead of dropping out of the wizard (a mistyped ENTER used to end the
     # session). ESC in the picker still exits.
+    WIZARD_CONFIRMED_FILE="$(mktemp)"
     rc=0
     while true; do
+        : > "$WIZARD_CONFIRMED_FILE"
         selected=()
         selection="$(picker "$cat_file")" || rc=$?
         if [[ $rc -ne 0 ]]; then
+            rm -f "$WIZARD_CONFIRMED_FILE"
             skip_note
             exit 0
         fi
@@ -599,14 +672,16 @@ run_dialog() {
         done <<< "$selection"
 
         if [[ ${#selected[@]} -eq 0 ]]; then
+            rm -f "$WIZARD_CONFIRMED_FILE"
             echo "😈 Nothing selected — nothing installed."
             skip_note
             exit 0
         fi
 
-        # Skipped when there is no tty (autostart relaunch) or when the test
-        # harness sets SYNTROPIA_WIZARD_ASSUME_YES.
-        if [[ -t 0 && -z "${SYNTROPIA_WIZARD_ASSUME_YES:-}" ]]; then
+        # Skipped when fzf already confirmed in-place, when there is no tty
+        # (autostart relaunch), or when the test harness sets
+        # SYNTROPIA_WIZARD_ASSUME_YES.
+        if [[ ! -s "$WIZARD_CONFIRMED_FILE" && -t 0 && -z "${SYNTROPIA_WIZARD_ASSUME_YES:-}" ]]; then
             local row reply
             echo
             echo "😈 Ready to install ${#selected[@]} app(s):"
@@ -628,6 +703,7 @@ run_dialog() {
         fi
         break
     done
+    rm -f "$WIZARD_CONFIRMED_FILE"
 
     # Durable first: the queue is the record of intent, yay is just the worker.
     queue_pending "${selected[@]}"
