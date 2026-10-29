@@ -364,7 +364,9 @@ EOS
         # `transform` landed in fzf 0.53; --help does not list action names, so
         # detect by version rather than by grepping usage output.
         local fzf_ver="" fzf_ok=0
-        fzf_ver="$(fzf --version 2>/dev/null | awk '{print $1}')"
+        # </dev/null matters: the test stub fzf reads stdin and ignores argv, so an
+        # inherited stdin would block here forever.
+        fzf_ver="$(fzf --version </dev/null 2>/dev/null | awk '{print $1}')"
         if [[ "$fzf_ver" =~ ^([0-9]+)\.([0-9]+) ]]; then
             if (( BASH_REMATCH[1] > 0 || BASH_REMATCH[2] >= 53 )); then
                 fzf_ok=1
