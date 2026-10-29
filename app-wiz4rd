@@ -583,44 +583,51 @@ run_dialog() {
         echo
     fi
 
+    # Pick -> confirm -> install, and on "no" go straight back to the picker
+    # instead of dropping out of the wizard (a mistyped ENTER used to end the
+    # session). ESC in the picker still exits.
     rc=0
-    selection="$(picker "$cat_file")" || rc=$?
-    if [[ $rc -ne 0 ]]; then
-        skip_note
-        exit 0
-    fi
-    while IFS=$'\t' read -r _ pkg _; do
-        [[ -n "${pkg:-}" ]] && selected+=("$pkg")
-    done <<< "$selection"
+    while true; do
+        selected=()
+        selection="$(picker "$cat_file")" || rc=$?
+        if [[ $rc -ne 0 ]]; then
+            skip_note
+            exit 0
+        fi
+        while IFS=$'\t' read -r _ pkg _; do
+            [[ -n "${pkg:-}" ]] && selected+=("$pkg")
+        done <<< "$selection"
 
-    if [[ ${#selected[@]} -eq 0 ]]; then
-        echo "😈 Nothing selected — nothing installed."
-        skip_note
-        exit 0
-    fi
+        if [[ ${#selected[@]} -eq 0 ]]; then
+            echo "😈 Nothing selected — nothing installed."
+            skip_note
+            exit 0
+        fi
 
-    # Confirm before anything touches the system. Skipped when there is no tty
-    # (autostart relaunch) or when SYNTROPIA_WIZARD_ASSUME_YES is set, which the
-    # test harness uses to drive the picker without answering prompts.
-    if [[ -t 0 && -z "${SYNTROPIA_WIZARD_ASSUME_YES:-}" ]]; then
-        local row
-        echo
-        echo "😈 Ready to install ${#selected[@]} app(s):"
-        for row in "${selected[@]}"; do
-            printf '   %s\n' "$(printf '%s' "$row" | cut -f1 | cut -c1-100)"
-        done
-        echo
-        local reply
-        read -r -p "Proceed? [Y/n] " reply || reply=""
-        case "${reply:-Y}" in
-            [Yy]*|"") ;;
-            *)
-                echo "Cancelled — nothing installed."
-                exit 0
-                ;;
-        esac
-        echo
-    fi
+        # Skipped when there is no tty (autostart relaunch) or when the test
+        # harness sets SYNTROPIA_WIZARD_ASSUME_YES.
+        if [[ -t 0 && -z "${SYNTROPIA_WIZARD_ASSUME_YES:-}" ]]; then
+            local row reply
+            echo
+            echo "😈 Ready to install ${#selected[@]} app(s):"
+            for row in "${selected[@]}"; do
+                printf '   %s\n' "$(printf '%s' "$row" | cut -f1 | cut -c1-100)"
+            done
+            echo
+            read -r -p "Proceed? [Y/n] " reply || reply=""
+            case "${reply:-Y}" in
+                [Yy]*|"") ;;
+                *)
+                    echo
+                    echo "OK — back to the picker. (ESC there cancels.)"
+                    echo
+                    continue
+                    ;;
+            esac
+            echo
+        fi
+        break
+    done
 
     # Durable first: the queue is the record of intent, yay is just the worker.
     queue_pending "${selected[@]}"
