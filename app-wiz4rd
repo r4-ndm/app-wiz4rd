@@ -315,7 +315,7 @@ picker() {
                 --border=rounded \
                 --separator='─' --scrollbar='▐' --highlight-line \
                 --info=inline-right \
-                --color='bg+:#1b1f27,fg+:#ffffff,hl:#7aa2f7,hl+:#7aa2f7:bold,pointer:#7aa2f7,marker:#9ece6a,prompt:#bb9af7,header:#565f89,border:#3b4261,info:#565f89' \
+                --color='bg+:#1b1f27,fg+:#ffffff,hl:#7aa2f7,hl+:#7aa2f7:bold,pointer:#7aa2f7,marker:#9ece6a,prompt:#bb9af7,header:#565f89,border:#3b4261,info:#565f89,selected-bg:#2a3244' \
                 --delimiter='\t' --with-nth=1 \
                 --pointer='▶' --marker='✓' \
                 --bind 'space:toggle+down,tab:toggle+down' \
